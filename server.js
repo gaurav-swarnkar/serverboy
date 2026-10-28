@@ -1,5 +1,6 @@
 const path = require('path');
 const http = require('http');
+const os = require('os');
 const express = require('express');
 const store = require('./lib/store');
 const auth = require('./lib/auth');
@@ -63,6 +64,12 @@ terminal.attach(server);
 server.listen(PORT, HOST, () => {
   console.log(`Serverboy is running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
   if (HOST !== '127.0.0.1' && HOST !== 'localhost') {
-    console.log('Warning: listening on a public interface. Put it behind HTTPS (see README) before using it over the internet.');
+    // List this machine's network addresses so phones on the same Wi-Fi know what to open.
+    const lan = Object.values(os.networkInterfaces())
+      .flat()
+      .filter((i) => i && i.family === 'IPv4' && !i.internal)
+      .map((i) => `http://${i.address}:${PORT}`);
+    if (lan.length) console.log(`On your phone (same Wi-Fi), open: ${lan.join('  or  ')}`);
+    console.log('Warning: listening on a network interface. Put it behind HTTPS (see README) before using it over the internet.');
   }
 });

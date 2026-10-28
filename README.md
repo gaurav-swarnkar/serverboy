@@ -38,6 +38,31 @@ Open <http://127.0.0.1:3000>. On first start, Serverboy prints a generated admin
 
 Serverboy connects over SSH, so the server needs nothing extra installed.
 
+## Using it on your phone
+
+The interface works on phones: the menu collapses behind a ☰ button.
+
+**Option A — on your home Wi-Fi (quick test).** Start Serverboy on your computer listening on your network:
+
+```bash
+HOST=0.0.0.0 npm start          # Windows PowerShell: $env:HOST="0.0.0.0"; npm start
+```
+
+It prints a line like `On your phone (same Wi-Fi), open: http://192.168.1.20:3000`. Open that on your phone. If it doesn't load, allow Node.js through your computer's firewall (Windows asks the first time). This is plain HTTP, so only do it on a network you trust, and stop it afterwards.
+
+**Option B — from anywhere, with HTTPS (recommended).** Install Serverboy on the Azure server itself:
+
+1. Point a subdomain such as `panel.example.com` (A record) to the server's IP, and open ports 80 and 443 in the Azure Networking settings.
+2. Copy this folder to the server (e.g. `git clone`), then run:
+   ```bash
+   sudo bash scripts/install-on-server.sh panel.example.com you@example.com
+   ```
+   This installs Node.js, runs Serverboy as a `serverboy` systemd service on `127.0.0.1:3000`, puts Nginx in front of it, and gets a free Let's Encrypt certificate.
+3. Open `https://panel.example.com` on your phone and log in with the password the script prints.
+4. In Serverboy, add the server itself with host `127.0.0.1`, your username and password.
+
+Run the script again any time to update Serverboy; your password and saved servers are kept.
+
 ## Azure checklist
 
 1. Azure Portal → your VM → **Networking** → make sure inbound port **22** is allowed (ideally only from your own IP).

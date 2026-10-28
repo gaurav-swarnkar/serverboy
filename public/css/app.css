@@ -94,10 +94,30 @@ h3 { font-size: 14px; margin: 0 0 8px; }
 .grid-3 { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 .grid-2 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
 
+.mobile-bar { display: none; }
+
 @media (max-width: 820px) {
   .layout { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; }
+  .mobile-bar {
+    display: flex; align-items: center; gap: 10px;
+    position: sticky; top: 0; z-index: 40;
+    background: var(--side); color: #fff; padding: 8px 12px;
+  }
+  .mobile-bar #menu-toggle { color: #fff; font-size: 20px; padding: 4px 10px; }
+  .mobile-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sidebar { display: none; position: sticky; top: 52px; height: auto; max-height: calc(100vh - 52px); z-index: 39; }
+  .sidebar > .brand { display: none; }
+  .layout.menu-open .sidebar { display: flex; }
+  .layout.menu-open .main { display: none; }
   .main { padding: 16px; }
+  .page-head h1 { font-size: 19px; }
+  .modal-backdrop { padding: 8px; place-items: end center; }
+  .modal { max-height: 94vh; }
+  .terminal-box { height: calc(100vh - 190px); }
+  td.actions { white-space: normal; }
+  td.actions button, td.actions .btn { margin: 2px 0; }
+  /* 16px inputs stop iOS Safari from zooming in on focus */
+  input, select, textarea { font-size: 16px; }
 }
 
 /* ---------- components ---------- */

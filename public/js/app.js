@@ -81,6 +81,11 @@ function renderShell(current) {
   ).join('');
   app.innerHTML = `
     <div class="layout">
+      <header class="mobile-bar">
+        <button id="menu-toggle" class="btn-ghost" aria-label="Menu">☰</button>
+        <span class="brand-logo">▣</span>
+        <span class="mobile-title">${esc(server ? server.name : 'Serverboy')}</span>
+      </header>
       <aside class="sidebar">
         <div class="brand"><span class="brand-logo">▣</span> Serverboy</div>
         ${
@@ -102,6 +107,12 @@ function renderShell(current) {
       </aside>
       <main class="main" id="view"></main>
     </div>`;
+  // On phones the sidebar is a slide-down menu; close it whenever a link is chosen.
+  const layout = app.querySelector('.layout');
+  app.querySelector('#menu-toggle').addEventListener('click', () => layout.classList.toggle('menu-open'));
+  app.querySelector('.nav').addEventListener('click', (e) => {
+    if (e.target.closest('a')) layout.classList.remove('menu-open');
+  });
   app.querySelector('#server-select')?.addEventListener('change', (e) => {
     const id = e.target.value;
     if (!id) return navigate('#/servers');
