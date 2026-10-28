@@ -50,18 +50,24 @@ HOST=0.0.0.0 npm start          # Windows PowerShell: $env:HOST="0.0.0.0"; npm s
 
 It prints a line like `On your phone (same Wi-Fi), open: http://192.168.1.20:3000`. Open that on your phone. If it doesn't load, allow Node.js through your computer's firewall (Windows asks the first time). This is plain HTTP, so only do it on a network you trust, and stop it afterwards.
 
-**Option B — from anywhere, with HTTPS (recommended).** Install Serverboy on the Azure server itself:
+**Option B — from anywhere, with HTTPS (recommended).** Install Serverboy on the Azure server itself. This works with **only a phone and no domain**:
 
-1. Point a subdomain such as `panel.example.com` (A record) to the server's IP, and open ports 80 and 443 in the Azure Networking settings.
-2. Copy this folder to the server (e.g. `git clone`), then run:
+1. In the Azure Portal (portal.azure.com in your phone's browser, or the Azure app), open your VM → **Networking** → add inbound port rules for **80** and **443**.
+2. Open your VM → **Run command** → **RunShellScript**, paste this, and tap **Run**:
    ```bash
-   sudo bash scripts/install-on-server.sh panel.example.com you@example.com
+   curl -fsSL https://raw.githubusercontent.com/gaurav-swarnkar/serverboy/ccr-af56e66b-azkhkc/scripts/install-on-server.sh | bash
    ```
-   This installs Node.js, runs Serverboy as a `serverboy` systemd service on `127.0.0.1:3000`, puts Nginx in front of it, and gets a free Let's Encrypt certificate.
-3. Open `https://panel.example.com` on your phone and log in with the password the script prints.
-4. In Serverboy, add the server itself with host `127.0.0.1`, your username and password.
+   (Or run it with `sudo` from any SSH app, such as Termius.) It takes a few minutes. It installs Node.js, runs Serverboy as a `serverboy` systemd service on `127.0.0.1:3000`, puts Nginx in front of it, and gets a free Let's Encrypt certificate.
+3. The output ends with your link, like `https://20-115-10-42.sslip.io`, and the admin password. [sslip.io](https://sslip.io) is a free service that turns your IP into a hostname, so no domain is needed.
+4. Open the link on your phone and log in. Add the server itself with host `127.0.0.1` and your VM username and password.
 
-Run the script again any time to update Serverboy; your password and saved servers are kept.
+**Private repository?** The command above only works if the repository is public. Otherwise, create a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with read-only *Contents* access to this repo, and run:
+```bash
+T=github_pat_XXXX
+curl -fsSL -H "Authorization: Bearer $T" https://raw.githubusercontent.com/gaurav-swarnkar/serverboy/ccr-af56e66b-azkhkc/scripts/install-on-server.sh | SERVERBOY_REPO="https://x-access-token:$T@github.com/gaurav-swarnkar/serverboy.git" bash
+```
+
+Got a domain later? Point it at the server and run `sudo bash /opt/serverboy/scripts/install-on-server.sh panel.example.com you@example.com`. Run the installer again any time to update Serverboy; your password and saved servers are kept. Forgot the password? It is in `/etc/serverboy.env` (`sudo cat /etc/serverboy.env` via Run command).
 
 ## Azure checklist
 
