@@ -226,3 +226,8 @@ pre.log {
 .terminal-box { background: #0b0e19; border-radius: var(--radius); padding: 8px; height: calc(100vh - 150px); min-height: 320px; }
 .terminal-box .xterm { height: 100%; }
 .btn-danger-fill { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+/* Shown until app.js replaces #app; the hint fades in only if loading stalls (no inline JS needed). */
+.boot { min-height: 100vh; display: grid; place-content: center; text-align: center; color: var(--muted); padding: 16px; }
+.boot-hint { opacity: 0; animation: boot-hint 0s 8s forwards; max-width: 360px; }
+@keyframes boot-hint { to { opacity: 1; } }
