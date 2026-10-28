@@ -1,0 +1,120 @@
+# Serverboy
+
+A self-hosted web control panel for your Linux server, a little like cPanel + phpMyAdmin + an FTP client, all in the browser.
+
+Give it your server's IP, username and password (or SSH key), and you can:
+
+| Page | What it does |
+| --- | --- |
+| **Dashboard** | Live CPU, memory, disk, uptime and top processes. Update all packages, reboot. |
+| **Terminal** | A full SSH terminal in the browser. |
+| **File Manager** | Browse, upload (drag & drop), download (folders as `.tar.gz`), edit, rename, delete, chmod/chown, extract `.zip`/`.tar.gz`. Falls back to sudo for root-owned files. |
+| **App Store** | One-click installs: Nginx, MongoDB 8.0, MariaDB, Redis, Node.js 22, PM2, PHP-FPM, Docker, Certbot, UFW, Fail2ban, Git. Two "quick stacks" install everything for a Node+MongoDB SaaS or a PHP+MariaDB site. Also search and install any apt package. |
+| **Services** | Start / stop / restart / enable / disable systemd services and read their logs. |
+| **Websites** | Create Nginx sites (static, single-page app, PHP, or reverse proxy to an app port). Edit config with automatic `nginx -t` rollback. Free Let's Encrypt SSL in one click. |
+| **Node Apps** | Deploy a Node.js app from Git (or from uploaded files), set environment variables, run it with PM2, put it on a domain, redeploy with one click, view logs. |
+| **Databases** | **MariaDB:** create databases + users, browse tables, run SQL, export (`.sql.gz`) and import. **MongoDB:** browse databases/collections/documents, insert/edit/delete documents, create per-app users (gives you the connection string), and turn on authentication with one click. |
+| **Firewall** | Manage UFW rules. It always allows your SSH port before turning on, so you can't lock yourself out. |
+| **Tasks** | Live logs of every install / deployment. |
+
+Installers target **Ubuntu 22.04 / 24.04** (Azure's default images) and Debian.
+
+## Quick start (on your own computer)
+
+You need [Node.js 20.12+](https://nodejs.org).
+
+```bash
+git clone <this repo> serverboy
+cd serverboy
+npm install
+npm start
+```
+
+Open <http://127.0.0.1:3000>. On first start, Serverboy prints a generated admin password in the terminal. Log in, then **Servers → Add server** and enter:
+
+- **IP address**: your Azure VM's *Public IP address* (VM → Overview)
+- **Username**: the admin user you chose when creating the VM (e.g. `azureuser`). Azure disables direct `root` login.
+- **Password**, or paste the **private key** (`.pem`) Azure gave you. If you use a key *and* sudo asks for a password, enter the password too.
+
+Serverboy connects over SSH, so the server needs nothing extra installed.
+
+## Azure checklist
+
+1. Azure Portal → your VM → **Networking** → make sure inbound port **22** is allowed (ideally only from your own IP).
+2. For websites, add inbound rules for **80** and **443**.
+3. Point your domain's **A record** to the VM's public IP before requesting SSL.
+
+A port has to be open in **both** the Azure Network Security Group and the server's own firewall (UFW) to be reachable.
+
+## Deploying a SaaS with MongoDB, step by step
+
+1. **App Store → Node.js SaaS (MongoDB)** quick stack. This installs Git, Nginx, Node.js, PM2, MongoDB, Certbot, UFW and Fail2ban.
+2. **Firewall** → *Allow SSH*, *Allow HTTP*, *Allow HTTPS*, then *Turn on*.
+3. **Databases → MongoDB → Secure MongoDB.** Creates an admin user and turns on authentication.
+4. **Databases → MongoDB → Users → New app user** for your app's database. Copy the `MONGODB_URI` it shows.
+5. **Node Apps → Deploy app**: your Git URL, branch, the port your app listens on (it gets `PORT` as an env var), build/start commands, `MONGODB_URI=…` and other secrets in *Environment variables*, and your domain.
+6. **Websites → Enable SSL** on that domain.
+7. After pushing new code, click **Redeploy**.
+
+Private GitHub repo? Use `https://<token>@github.com/you/repo.git` with a fine-grained, read-only token.
+
+Each app lives in `/var/www/<name>`, owned by your SSH user, with its settings in `.serverboy-app.json` and secrets in `.env`.
+
+## Configuration
+
+Copy `.env.example` to `.env` (it is loaded automatically by `npm start`):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HOST` | `127.0.0.1` | Interface to listen on. Keep the default unless you put Serverboy behind HTTPS. |
+| `PORT` | `3000` | Port for the web UI. |
+| `ADMIN_PASSWORD` | *(generated)* | Set the admin password here instead of using the generated one. |
+| `SERVERBOY_SECRET` | *(generated)* | Key used to encrypt saved server credentials. |
+| `DATA_DIR` | `./data` | Where config and saved servers are stored. |
+| `TRUST_PROXY` | *(off)* | Set to `1` when running behind Nginx so the real client IP is used. |
+
+## Security notes
+
+Serverboy holds the keys to your server, so treat it like one:
+
+- By default it **only listens on 127.0.0.1**, so only your own computer can reach it.
+- Saved passwords, keys and database URIs are encrypted (AES-256-GCM) in `data/servers.json`. The encryption key is in `data/config.json` (or `SERVERBOY_SECRET`), so protect the `data/` folder.
+- The server's SSH host key is pinned on first connection; Serverboy refuses to connect if it changes (a sign of a man-in-the-middle attack, or a rebuilt server: use *Edit → Reset host key* in that case).
+- Login is rate-limited, sessions use HttpOnly SameSite cookies, and every state-changing request needs a custom header (CSRF protection).
+- Prefer SSH keys over passwords, keep port 22 restricted to your IP in Azure, and install Fail2ban.
+
+### Running Serverboy on the server itself
+
+If you'd rather reach Serverboy from anywhere, run it **on the server** and put it behind HTTPS:
+
+1. Use **Node Apps** (or SSH) to run Serverboy on the server, listening on `127.0.0.1:3000`, with a strong `ADMIN_PASSWORD` and `TRUST_PROXY=1`.
+2. **Websites → Add website**, type *Reverse proxy*, port `3000`, e.g. `panel.example.com`.
+3. **Enable SSL** for it.
+
+Never expose it over plain HTTP. Add the server to itself with host `127.0.0.1`.
+
+## Project layout
+
+```
+server.js            HTTP server, routing, security headers
+lib/ssh.js           SSH connection pool, sudo handling, SFTP helpers
+lib/store.js         Encrypted storage for servers + admin password
+lib/auth.js          Login sessions, CSRF guard
+lib/jobs.js          Background tasks with live logs
+lib/catalog.js       One-click installer definitions (add new apps here)
+lib/nginx.js         Nginx site templates
+lib/terminal.js      WebSocket ⇄ SSH shell bridge
+routes/*.js          REST API (system, files, databases, sites, nodeapps)
+public/              Frontend (vanilla JS modules, no build step)
+```
+
+Adding a new one-click app is just a new entry in `lib/catalog.js` with `check`, `install` and (optionally) `uninstall` shell snippets.
+
+## Roadmap ideas
+
+- Scheduled database backups (to disk or Azure Blob Storage)
+- Cron job manager
+- Docker containers / compose page
+- Multiple portal users with roles
+- Uptime alerts by email
+- Python / PHP app deploys
