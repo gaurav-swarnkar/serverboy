@@ -67,7 +67,7 @@ T=github_pat_XXXX
 curl -fsSL -H "Authorization: Bearer $T" https://raw.githubusercontent.com/gaurav-swarnkar/serverboy/ccr-af56e66b-azkhkc/scripts/install-on-server.sh | SERVERBOY_REPO="https://x-access-token:$T@github.com/gaurav-swarnkar/serverboy.git" bash
 ```
 
-Got a domain later? Point it at the server and run `sudo bash /opt/serverboy/scripts/install-on-server.sh panel.example.com you@example.com`. Run the installer again any time to update Serverboy; your password and saved servers are kept. Forgot the password? It is in `/etc/serverboy.env` (`sudo cat /etc/serverboy.env` via Run command).
+Got a domain later? Point it at the server and run `sudo bash /opt/serverboy/scripts/install-on-server.sh panel.example.com you@example.com`. Run the installer again any time to update Serverboy; your password and saved servers are kept. Change the password under **Settings** in Serverboy. Forgot it? Put a new one in `ADMIN_PASSWORD=` in `/etc/serverboy.env` (`sudo nano /etc/serverboy.env`) and run `sudo systemctl restart serverboy`.
 
 ## Azure checklist
 
@@ -99,7 +99,7 @@ Copy `.env.example` to `.env` (it is loaded automatically by `npm start`):
 | --- | --- | --- |
 | `HOST` | `127.0.0.1` | Interface to listen on. Keep the default unless you put Serverboy behind HTTPS. |
 | `PORT` | `3000` | Port for the web UI. |
-| `ADMIN_PASSWORD` | *(generated)* | Set the admin password here instead of using the generated one. |
+| `ADMIN_PASSWORD` | *(generated)* | Initial admin password. You can still change it under Settings; changing this value later resets the password to it. |
 | `SERVERBOY_SECRET` | *(generated)* | Key used to encrypt saved server credentials. |
 | `DATA_DIR` | `./data` | Where config and saved servers are stored. |
 | `TRUST_PROXY` | *(off)* | Set to `1` when running behind Nginx so the real client IP is used. |

@@ -165,5 +165,6 @@ else
   echo " and open http://127.0.0.1:3000"
 fi
 echo " Admin password: $(grep '^ADMIN_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
+echo "   (if you changed it under Settings, use your new one instead)"
 echo " Inside Serverboy, add this same server with host 127.0.0.1."
 echo "=================================================================="
