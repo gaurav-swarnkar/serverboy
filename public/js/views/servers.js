@@ -1,4 +1,4 @@
-import { api, esc, toast, run, formDialog, confirmDialog, onAction, modal } from '../ui.js';
+import { api, esc, toast, run, formDialog, confirmDialog, onAction, modal, can } from '../ui.js';
 
 const SERVER_FIELDS = (s = {}) => [
   { name: 'name', label: 'Display name', value: s.name, placeholder: 'My Azure server' },
@@ -36,7 +36,7 @@ export async function render(el, { navigate, refreshServers }) {
   el.innerHTML = `
     <div class="page-head">
       <div><h1>Servers</h1><div class="sub">Connect Serverboy to your Linux servers over SSH.</div></div>
-      <button class="btn-primary" data-action="add">+ Add server</button>
+      ${can('owner') ? '<button class="btn-primary" data-action="add">+ Add server</button>' : ''}
     </div>
     ${
       servers.length
@@ -49,9 +49,9 @@ export async function render(el, { navigate, refreshServers }) {
             <p class="small muted" style="margin:0 0 12px">Host key: ${s.hostFingerprint ? `<span class="mono">${esc(s.hostFingerprint.slice(0, 26))}…</span>` : 'not verified yet'}</p>
             <div class="row">
               <a class="btn btn-primary" href="#/s/${s.id}/dashboard">Open</a>
-              <button data-action="test" data-id="${s.id}">Test connection</button>
+              ${can('owner') ? `<button data-action="test" data-id="${s.id}">Test connection</button>
               <button data-action="edit" data-id="${s.id}">Edit</button>
-              <button class="btn-danger" data-action="remove" data-id="${s.id}">Remove</button>
+              <button class="btn-danger" data-action="remove" data-id="${s.id}">Remove</button>` : ''}
             </div>
           </div>`,
             )
@@ -59,7 +59,7 @@ export async function render(el, { navigate, refreshServers }) {
         : `<div class="card empty">
             <h2>Add your first server</h2>
             <p>You need the server's public IP and the username + password (or key) you chose when creating the Azure VM.</p>
-            <button class="btn-primary" data-action="add">+ Add server</button>
+            ${can('owner') ? '<button class="btn-primary" data-action="add">+ Add server</button>' : '<p class="muted">Ask the owner to add a server.</p>'}
           </div>`
     }
     <div class="card" style="margin-top:20px">

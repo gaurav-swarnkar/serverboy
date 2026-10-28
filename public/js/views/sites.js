@@ -1,4 +1,4 @@
-import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, onAction, loadingHtml, errorHtml } from '../ui.js';
+import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, onAction, loadingHtml, errorHtml, can } from '../ui.js';
 
 export async function render(el, { server }) {
   const base = `/servers/${server.id}`;
@@ -102,13 +102,17 @@ export async function render(el, { server }) {
         return toast(err.message, 'error');
       }
       const body = document.createElement('div');
-      body.innerHTML = '<textarea spellcheck="false" style="width:100%;height:60vh;white-space:pre"></textarea><p class="small muted">Saved changes are tested with <span class="mono">nginx -t</span> and rolled back automatically if invalid.</p>';
+      body.innerHTML = `<textarea spellcheck="false" style="width:100%;height:60vh;white-space:pre" ${can('owner') ? '' : 'readonly'}></textarea><p class="small muted">${
+        can('owner')
+          ? 'Saved changes are tested with <span class="mono">nginx -t</span> and rolled back automatically if invalid.'
+          : 'Read-only: only the owner can edit raw Nginx configuration.'
+      }</p>`;
       body.querySelector('textarea').value = content;
       modal({
         title: `Nginx config: ${s.name}`,
         wide: true,
         body,
-        actions: [
+        actions: can('owner') ? [
           { label: 'Cancel' },
           {
             label: 'Save & reload',
@@ -119,7 +123,7 @@ export async function render(el, { server }) {
               load();
             },
           },
-        ],
+        ] : [{ label: 'Close' }],
       });
     },
     toggle: async ({ i }, btn) => {

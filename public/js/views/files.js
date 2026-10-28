@@ -1,4 +1,4 @@
-import { api, esc, toast, run, modal, confirmDialog, formDialog, fmtBytes, fmtDate, onAction, loadingHtml, errorHtml } from '../ui.js';
+import { api, esc, toast, run, modal, confirmDialog, formDialog, fmtBytes, fmtDate, onAction, loadingHtml, errorHtml, can } from '../ui.js';
 
 const ARCHIVE_RE = /\.(zip|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz)$/i;
 
@@ -23,7 +23,7 @@ export async function render(el, { server }) {
       <div><h1>File Manager</h1><div class="sub">Browse, upload, edit and download files, like an FTP client.</div></div>
       <div class="row">
         <button data-action="go" data-path="/var/www">/var/www</button>
-        <button data-action="home">Home</button>
+        ${can('owner') ? '<button data-action="home">Home</button>' : ''}
         <button data-action="newFolder">+ Folder</button>
         <button data-action="newFile">+ File</button>
         <label class="btn btn-primary">⬆ Upload<input type="file" id="upload" multiple hidden></label>

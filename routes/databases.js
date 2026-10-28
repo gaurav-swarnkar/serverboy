@@ -5,6 +5,7 @@ const multer = require('multer');
 const ssh = require('../lib/ssh');
 const store = require('../lib/store');
 const jobs = require('../lib/jobs');
+const { mongosh } = require('../lib/mongosh');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
@@ -163,32 +164,11 @@ router.post('/mysql/databases/:name/import', upload.single('file'), async (req, 
 
 // ======================= MongoDB =======================
 
-const DEFAULT_MONGO_URI = 'mongodb://127.0.0.1:27017';
-const MARK = '__SERVERBOY__';
-
 function mongoName(name, what) {
   if (!MONGO_NAME_RE.test(String(name || ''))) throw new HttpError(400, `Invalid ${what}`);
   return String(name);
 }
 
-// Run JavaScript in mongosh; the script must call out(value) once with the result.
-async function mongosh(serverId, script, uriOverride) {
-  const server = store.getServer(serverId);
-  const uri = uriOverride || server.mongoUri || DEFAULT_MONGO_URI;
-  const js = `const out = (v) => print(${JSON.stringify(MARK)} + EJSON.stringify(v, null, 0, { relaxed: true }));\n${script}`;
-  const r = await ssh.exec(
-    serverId,
-    `command -v mongosh >/dev/null || { echo "MongoDB shell (mongosh) is not installed. Install MongoDB from the App Store." >&2; exit 1; }
-mongosh ${q(uri)} --quiet --norc --eval ${q(js)}`,
-    { timeout: 2 * 60 * 1000 },
-  );
-  const line = r.stdout.split('\n').find((l) => l.startsWith(MARK));
-  if (r.code !== 0 || !line) {
-    const msg = (r.stderr || r.stdout).trim().split('\n').slice(-6).join('\n');
-    throw new HttpError(500, msg || 'mongosh failed');
-  }
-  return JSON.parse(line.slice(MARK.length));
-}
 
 router.get('/mongo/status', async (req, res) => {
   const r = await ssh.exec(

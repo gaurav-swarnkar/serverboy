@@ -1,4 +1,4 @@
-import { api, esc, fmtBytes, fmtDuration, run, confirmDialog, showJob, onAction, errorHtml, toast } from '../ui.js';
+import { api, esc, fmtBytes, fmtDuration, run, confirmDialog, showJob, onAction, errorHtml, toast, can } from '../ui.js';
 
 function pct(used, total) {
   return total ? Math.round((used / total) * 100) : 0;
@@ -14,8 +14,8 @@ export async function render(el, { server }) {
     <div class="page-head">
       <div><h1>${esc(server.name)}</h1><div class="sub mono">${esc(server.username)}@${esc(server.host)}</div></div>
       <div class="row">
-        <button data-action="update">Update all packages</button>
-        <button class="btn-danger" data-action="reboot">Reboot</button>
+        ${can('system') ? `<button data-action="update">Update all packages</button>
+        <button class="btn-danger" data-action="reboot">Reboot</button>` : ''}
       </div>
     </div>
     <div id="stats"><div class="loading"><span class="spinner"></span>Connecting to ${esc(server.host)}…</div></div>`;
@@ -61,7 +61,7 @@ export async function render(el, { server }) {
               <tbody>${s.processes
                 .map(
                   (p) => `<tr><td class="mono">${p.pid}</td><td>${esc(p.user)}</td><td>${p.cpu}%</td><td>${fmtBytes(p.rss)}</td><td class="mono">${esc(p.command)}</td>
-                  <td class="actions"><button class="btn-sm btn-danger" data-action="kill" data-pid="${p.pid}" data-name="${esc(p.command)}">Kill</button></td></tr>`,
+                  <td class="actions">${can('system') ? `<button class="btn-sm btn-danger" data-action="kill" data-pid="${p.pid}" data-name="${esc(p.command)}">Kill</button>` : ''}</td></tr>`,
                 )
                 .join('')}</tbody>
             </table></div>

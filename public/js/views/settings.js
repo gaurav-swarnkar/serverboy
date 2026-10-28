@@ -1,13 +1,13 @@
-import { api, run, toast } from '../ui.js';
+import { api, run, toast, esc, session } from '../ui.js';
 
 export async function render(el) {
   el.innerHTML = `
-    <div class="page-head"><div><h1>Settings</h1><div class="sub">Serverboy portal settings.</div></div></div>
+    <div class="page-head"><div><h1>Settings</h1><div class="sub">Logged in as <b>${esc(session.user.username)}</b>${session.user.isOwner ? ' (owner)' : ''}.</div></div></div>
     <div class="card" style="max-width:480px">
-      <h2>Change admin password</h2>
+      <h2>Change your password</h2>
       <form id="pw">
         <label class="field"><span>Current password</span><input type="password" name="current" required autocomplete="current-password"></label>
-        <label class="field"><span>New password</span><input type="password" name="next" required minlength="8" autocomplete="new-password"></label>
+        <label class="field"><span>New password</span><input type="password" name="next" required minlength="${session.user.isOwner ? 8 : 10}" autocomplete="new-password"></label>
         <label class="field"><span>Repeat new password</span><input type="password" name="repeat" required autocomplete="new-password"></label>
         <button class="btn-primary">Change password</button>
       </form>

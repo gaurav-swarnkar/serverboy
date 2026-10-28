@@ -16,6 +16,7 @@ Give it your server's IP, username and password (or SSH key), and you can:
 | **Databases** | **MariaDB:** create databases + users, browse tables, run SQL, export (`.sql.gz`) and import. **MongoDB:** browse databases/collections/documents, insert/edit/delete documents, create per-app users (gives you the connection string), and turn on authentication with one click. |
 | **Firewall** | Manage UFW rules. It always allows your SSH port before turning on, so you can't lock yourself out. |
 | **Tasks** | Live logs of every install / deployment. |
+| **Team** | Logins for your developers with per-person permissions, plus an activity log of who did what (stored in MongoDB). |
 
 Installers target **Ubuntu 22.04 / 24.04** (Azure's default images) and Debian.
 
@@ -91,6 +92,32 @@ Private GitHub repo? Use `https://<token>@github.com/you/repo.git` with a fine-g
 
 Each app lives in `/var/www/<name>`, owned by your SSH user, with its settings in `.serverboy-app.json` and secrets in `.env`.
 
+## Team accounts and permissions
+
+You (the **owner**) log in as `admin`. Your login is stored in `data/config.json` (or `/etc/serverboy.env` on a server install), **not** in MongoDB, so you can always get in, even when MongoDB is down.
+
+Team members, their permissions and the activity log live in a `serverboy` database in MongoDB:
+
+1. Databases → MongoDB → **Connection settings**: save your MongoDB admin login (needed once, for setup).
+2. **Team** → **Create the serverboy database for me**. This creates the database and a `serverboy_app` MongoDB user that can only access that database. You can paste your own connection string instead.
+3. **+ Add team member**: pick a username and permissions, then share the login details it shows you.
+
+| Permission | Allows |
+| --- | --- |
+| Databases | MariaDB / MongoDB databases, users, queries, import / export |
+| Websites | Create sites, SSL, enable / disable, delete (raw Nginx config editing stays owner-only) |
+| Website files | File manager inside `/var/www` only, with no admin rights; Node app folders need *Node apps* |
+| Services | Service logs, start / stop / restart |
+| Node apps ⚠ | Deploy and manage Node.js apps |
+| Terminal ⚠ | Shell on the server |
+| System ⚠ | App Store, packages, firewall, updates, reboot, killing processes |
+
+The **Developer** preset is Databases + Websites + Website files + Services. Everyone can see the dashboard, the service list and task logs. Adding servers, the Team page and Serverboy's own settings are always owner-only.
+
+⚠ *Node apps*, *Terminal* and *System* run commands as the server's SSH user (who can use sudo), so they are effectively full server access. Only give them to people you would give the server password to.
+
+Permission changes, disabling and deleting a user take effect immediately (their sessions end). The activity log records logins, every change and every download (who, when, from which IP, and whether it was allowed) and keeps entries for 90 days. Passwords and file contents are never logged.
+
 ## Configuration
 
 Copy `.env.example` to `.env` (it is loaded automatically by `npm start`):
@@ -102,6 +129,7 @@ Copy `.env.example` to `.env` (it is loaded automatically by `npm start`):
 | `ADMIN_PASSWORD` | *(generated)* | Initial admin password. You can still change it under Settings; changing this value later resets the password to it. |
 | `SERVERBOY_SECRET` | *(generated)* | Key used to encrypt saved server credentials. |
 | `DATA_DIR` | `./data` | Where config and saved servers are stored. |
+| `SERVERBOY_MONGO_URI` | *(set in the Team page)* | MongoDB connection string for team accounts; overrides the one saved in the Team page. |
 | `TRUST_PROXY` | *(off)* | Set to `1` when running behind Nginx so the real client IP is used. |
 
 ## Security notes
@@ -130,7 +158,9 @@ Never expose it over plain HTTP. Add the server to itself with host `127.0.0.1`.
 server.js            HTTP server, routing, security headers
 lib/ssh.js           SSH connection pool, sudo handling, SFTP helpers
 lib/store.js         Encrypted storage for servers + admin password
-lib/auth.js          Login sessions, CSRF guard
+lib/auth.js          Login sessions (owner + team), CSRF guard
+lib/team.js          Team accounts + activity log in MongoDB
+lib/permissions.js   Permission list and which routes need which permission
 lib/jobs.js          Background tasks with live logs
 lib/catalog.js       One-click installer definitions (add new apps here)
 lib/nginx.js         Nginx site templates
@@ -146,6 +176,7 @@ Adding a new one-click app is just a new entry in `lib/catalog.js` with `check`,
 - Scheduled database backups (to disk or Azure Blob Storage)
 - Cron job manager
 - Docker containers / compose page
-- Multiple portal users with roles
+- Per-server access for team members
+- Run team actions as a separate low-privilege Linux user, so *Node apps* no longer means full access
 - Uptime alerts by email
 - Python / PHP app deploys

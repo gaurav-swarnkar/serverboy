@@ -270,3 +270,15 @@ export function randomPassword(len = 20) {
   const bytes = crypto.getRandomValues(new Uint8Array(len));
   return [...bytes].map((b) => chars[b % chars.length]).join('');
 }
+
+// The logged-in user (set by app.js from /api/me). The server enforces permissions; this only
+// hides buttons the user could not use anyway.
+export const session = { user: null };
+
+export function can(permission) {
+  const u = session.user;
+  if (!u) return false;
+  if (u.isOwner) return true;
+  if (permission === 'owner') return false;
+  return !permission || u.permissions.includes(permission);
+}

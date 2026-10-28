@@ -1,4 +1,4 @@
-import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, fmtBytes, onAction, loadingHtml, errorHtml, randomPassword } from '../ui.js';
+import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, fmtBytes, onAction, loadingHtml, errorHtml, randomPassword, can } from '../ui.js';
 
 export async function render(el, { server, rest }) {
   const tab = rest[0] === 'mongo' ? 'mongo' : 'mysql';
@@ -242,8 +242,8 @@ function renderMongo(el, server) {
       <span>Authentication: ${s.authEnabled ? '<span class="badge ok">enabled</span>' : '<span class="badge warn">off</span>'}</span>
       <span class="grow"></span>
       <button class="btn-sm" data-action="users">Users</button>
-      <button class="btn-sm" data-action="creds">Connection settings</button>
-      ${s.authEnabled ? '' : '<button class="btn-sm btn-primary" data-action="secure">Secure MongoDB</button>'}
+      ${can('owner') ? '<button class="btn-sm" data-action="creds">Connection settings</button>' : ''}
+      ${s.authEnabled || !can('owner') ? '' : '<button class="btn-sm btn-primary" data-action="secure">Secure MongoDB</button>'}
     </div>
     ${s.authEnabled ? '' : '<p class="small muted" style="margin:8px 0 0">Authentication is off: anything on this server can read your data. Click "Secure MongoDB" before going live.</p>'}
     ${s.authEnabled && !s.hasCredentials ? '<p class="small" style="margin:8px 0 0;color:var(--warn)">Auth is on but Serverboy has no admin credentials. Add them under "Connection settings".</p>' : ''}

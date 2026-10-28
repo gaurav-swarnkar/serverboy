@@ -5,6 +5,8 @@ const express = require('express');
 const store = require('./lib/store');
 const auth = require('./lib/auth');
 const terminal = require('./lib/terminal');
+const team = require('./lib/team');
+const { requiredForServerRoute, can } = require('./lib/permissions');
 
 const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT) || 3000;
@@ -34,11 +36,18 @@ app.use('/vendor/xterm-addon-fit', express.static(vendor('@xterm/addon-fit')));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/api', auth.router);
-app.use('/api', auth.requireAuth, require('./routes/servers'));
+
+const api = express.Router();
+api.use(auth.requireAuth);
+api.use(auditLog);
+api.use(require('./routes/servers'));
+api.use(require('./routes/team'));
 
 const perServer = express.Router({ mergeParams: true });
 perServer.use((req, res, next) => {
   if (!store.getServer(req.params.id)) return res.status(404).json({ error: 'Server not found' });
+  const needed = requiredForServerRoute(req.method, req.path);
+  if (!can(req.user, needed)) return res.status(403).json({ error: auth.deniedMessage(needed) });
   next();
 });
 perServer.use(require('./routes/system'));
@@ -46,7 +55,8 @@ perServer.use(require('./routes/files'));
 perServer.use(require('./routes/databases'));
 perServer.use(require('./routes/sites'));
 perServer.use(require('./routes/nodeapps'));
-app.use('/api/servers/:id', auth.requireAuth, perServer);
+api.use('/servers/:id', perServer);
+app.use('/api', api);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 
@@ -57,6 +67,32 @@ app.use((err, req, res, next) => {
   if (res.headersSent) return res.end();
   res.status(status).json({ error: err.message || 'Something went wrong' });
 });
+
+// Record every change (and every download) in the team activity log. Request bodies are never
+// logged because they can contain passwords.
+function auditLog(req, res, next) {
+  const isDownload = /\/(files\/download|export)$/.test(req.path);
+  // Team routes write their own, more readable entries ("Created user ravi").
+  if ((req.method === 'GET' && !isDownload) || req.path.startsWith('/team')) return next();
+  res.on('finish', () => {
+    let path = req.originalUrl.split('?')[0];
+    let serverName;
+    const m = path.match(/^\/api\/servers\/([^/]+)/);
+    if (m) {
+      serverName = store.listServers().find((s) => s.id === m[1])?.name;
+      path = path.replace(m[0], '') || '/';
+    }
+    team.audit({
+      user: req.user.username,
+      ip: req.ip,
+      action: `${req.method} ${path.replace(/^\/api/, '')}`,
+      target: req.query?.path ? String(req.query.path) : undefined,
+      server: serverName,
+      status: res.statusCode,
+    });
+  });
+  next();
+}
 
 const server = http.createServer(app);
 terminal.attach(server);

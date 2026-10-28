@@ -17,7 +17,7 @@ router.post('/sites', async (req, res) => {
   const aliases = String(body.aliases || '')
     .split(/[\s,]+/)
     .filter(Boolean);
-  res.json(await nginx.createSite(req.params.id, { ...body, aliases }));
+  res.json(await nginx.createSite(req.params.id, { ...body, aliases, restrictRoot: !req.user.isOwner }));
 });
 
 router.get('/sites/:name/config', async (req, res) => {

@@ -1,4 +1,4 @@
-import { api, esc, toast, loadingHtml, errorHtml } from './ui.js';
+import { api, esc, toast, loadingHtml, errorHtml, session, can } from './ui.js';
 
 const views = {
   servers: () => import('./views/servers.js'),
@@ -13,6 +13,24 @@ const views = {
   firewall: () => import('./views/firewall.js'),
   jobs: () => import('./views/jobs.js'),
   settings: () => import('./views/settings.js'),
+  team: () => import('./views/team.js'),
+};
+
+// Permission each page needs (null = anyone logged in). The server enforces the same rules.
+const VIEW_PERMISSION = {
+  dashboard: null,
+  terminal: 'terminal',
+  files: 'files',
+  apps: 'system',
+  services: 'services',
+  sites: 'sites',
+  nodeapps: 'nodeapps',
+  databases: 'databases',
+  firewall: 'system',
+  jobs: null,
+  servers: null,
+  settings: null,
+  team: 'owner',
 };
 
 const NAV = [
@@ -45,15 +63,17 @@ export async function refreshServers() {
 }
 
 function showLogin() {
+  session.user = null;
   state.cleanup?.();
   state.cleanup = null;
   app.innerHTML = `
     <div class="login-wrap">
       <form class="card login">
         <div class="brand"><span class="brand-logo">▣</span> Serverboy</div>
-        <label class="field"><span>Admin password</span><input type="password" name="password" autofocus required></label>
+        <label class="field"><span>Username</span><input name="username" value="admin" autocomplete="username" required></label>
+        <label class="field"><span>Password</span><input type="password" name="password" autocomplete="current-password" autofocus required></label>
         <button class="btn-primary" style="width:100%;justify-content:center">Log in</button>
-        <p class="muted small" style="margin-bottom:0">The first-run password is printed in the terminal where you started Serverboy.</p>
+        <p class="muted small" style="margin-bottom:0">Owner: log in as <b>admin</b>. Team members: use the username the owner gave you.</p>
       </form>
     </div>`;
   const form = app.querySelector('form');
@@ -61,7 +81,7 @@ function showLogin() {
     const btn = form.querySelector('button');
     btn.disabled = true;
     try {
-      await api('/login', { method: 'POST', body: { password: form.password.value } });
+      await api('/login', { method: 'POST', body: { username: form.username.value, password: form.password.value } });
       await start();
     } catch (err) {
       toast(err.message, 'error');
@@ -72,10 +92,11 @@ function showLogin() {
 
 function renderShell(current) {
   const server = state.servers.find((s) => s.id === current.serverId);
-  const nav = NAV.map(
+  const nav = NAV.filter(([, items]) => items.some(([view]) => can(VIEW_PERMISSION[view]))).map(
     ([section, items]) => `
       <div class="nav-section">${section}</div>
       ${items
+        .filter(([view]) => can(VIEW_PERMISSION[view]))
         .map(([view, ico, label]) => `<a href="#/s/${server?.id}/${view}" class="${current.view === view ? 'active' : ''}"><span class="ico">${ico}</span>${label}</a>`)
         .join('')}`,
   ).join('');
@@ -101,8 +122,9 @@ function renderShell(current) {
           ${server ? nav : ''}
           <div class="nav-section">Portal</div>
           <a href="#/servers" class="${current.view === 'servers' ? 'active' : ''}"><span class="ico">▣</span>Servers</a>
+          ${can('owner') ? `<a href="#/team" class="${current.view === 'team' ? 'active' : ''}"><span class="ico">☺</span>Team</a>` : ''}
           <a href="#/settings" class="${current.view === 'settings' ? 'active' : ''}"><span class="ico">✎</span>Settings</a>
-          <a href="#" id="logout"><span class="ico">⏻</span>Log out</a>
+          <a href="#" id="logout"><span class="ico">⏻</span>Log out <span class="muted small">(${esc(session.user?.username)})</span></a>
         </nav>
       </aside>
       <main class="main" id="view"></main>
@@ -117,7 +139,7 @@ function renderShell(current) {
     const id = e.target.value;
     if (!id) return navigate('#/servers');
     const view = parseHash().view;
-    navigate(`#/s/${id}/${views[view] && view !== 'servers' && view !== 'settings' ? view : 'dashboard'}`);
+    navigate(`#/s/${id}/${views[view] && !['servers', 'settings', 'team'].includes(view) ? view : 'dashboard'}`);
   });
   app.querySelector('#logout').addEventListener('click', async (e) => {
     e.preventDefault();
@@ -134,6 +156,10 @@ async function route() {
     if (!state.servers.find((s) => s.id === current.serverId)) return navigate('#/servers');
   }
   if (!views[current.view]) return navigate('#/servers');
+  if (!can(VIEW_PERMISSION[current.view])) {
+    toast("You don't have access to that page.", 'error');
+    return navigate(current.serverId ? `#/s/${current.serverId}/dashboard` : '#/servers');
+  }
 
   state.cleanup?.();
   state.cleanup = null;
@@ -152,6 +178,7 @@ async function route() {
 async function start() {
   const me = await api('/me');
   if (!me.loggedIn) return showLogin();
+  session.user = me.user;
   await refreshServers();
   if (!location.hash || location.hash === '#/' || location.hash === '#') {
     if (state.servers.length) return navigate(`#/s/${state.servers[0].id}/dashboard`);
