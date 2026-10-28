@@ -267,7 +267,10 @@ function renderMongo(el, server) {
         )
         .join('');
     } catch (err) {
-      treeEl.innerHTML = `<div style="padding:12px">${errorHtml(err)}</div>`;
+      const hint = /requires authentication|Authentication failed/i.test(err.message)
+        ? '<p class="small" style="margin:8px 0 0">MongoDB needs a login: click <b>Connection settings</b> above.</p>'
+        : '';
+      treeEl.innerHTML = `<div style="padding:12px">${errorHtml(err)}${hint}</div>`;
     }
   }
 
@@ -420,13 +423,19 @@ function renderMongo(el, server) {
     },
     creds: async () => {
       const v = await formDialog({
-        title: 'MongoDB connection used by Serverboy',
-        intro: 'Leave empty to use mongodb://127.0.0.1:27017 without a password. Stored encrypted.',
-        fields: [{ name: 'uri', label: 'Admin connection string', placeholder: 'mongodb://admin:password@127.0.0.1:27017/?authSource=admin' }],
+        title: 'MongoDB login used by Serverboy',
+        intro: 'Enter a MongoDB admin user (one with the root role). Serverboy checks the login works before saving it, encrypted. Leave everything empty to connect without a password.',
+        fields: [
+          { name: 'user', label: 'Admin user name', placeholder: 'admin' },
+          { name: 'password', label: 'Password', type: 'password' },
+          { name: 'authDb', label: 'Authentication database', value: 'admin', help: 'Almost always admin.' },
+          { name: 'uri', label: 'Or a full connection string (advanced)', placeholder: 'mongodb://admin:password@127.0.0.1:27017/?authSource=admin' },
+        ],
+        submitLabel: 'Test & save',
         submit: (x) => api(`${base}/credentials`, { method: 'POST', body: x }),
       });
       if (v) {
-        toast('Saved', 'ok');
+        toast('Connected and saved', 'ok');
         refresh();
       }
     },

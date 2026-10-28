@@ -369,10 +369,23 @@ grep -A1 '^security:' /etc/mongod.conf`,
   );
 });
 
-// Save (or clear) the MongoDB connection string Serverboy uses for this server.
+// Save (or clear) the MongoDB login Serverboy uses for this server. Given a user + password it
+// builds the connection string itself (so special characters are encoded) and checks it works.
 router.post('/mongo/credentials', async (req, res) => {
-  const uri = String(req.body?.uri ?? '').trim();
+  let uri = String(req.body?.uri ?? '').trim();
+  const user = String(req.body?.user ?? '').trim();
+  if (!uri && user) {
+    const authDb = mongoName(req.body?.authDb || 'admin', 'authentication database');
+    uri = `mongodb://${encodeURIComponent(user)}:${encodeURIComponent(String(req.body?.password ?? ''))}@127.0.0.1:27017/?authSource=${authDb}`;
+  }
   if (uri && !/^mongodb(\+srv)?:\/\//.test(uri)) throw new HttpError(400, 'Must start with mongodb://');
+  if (uri) {
+    try {
+      await mongosh(req.params.id, 'out(db.adminCommand({ listDatabases: 1, nameOnly: true }).ok);', uri);
+    } catch (err) {
+      throw new HttpError(400, `These credentials did not work, nothing was saved:\n${err.message}`);
+    }
+  }
   store.updateServer(req.params.id, { mongoUri: uri });
   res.json({ ok: true });
 });
