@@ -11,6 +11,8 @@ const nginx = require('../lib/nginx');
 const team = require('../lib/team');
 const { mongosh } = require('../lib/mongosh');
 const { buildSteps, readRemote } = require('./nodeapps');
+const catalog = require('../lib/catalog');
+const { can } = require('../lib/permissions');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
@@ -131,17 +133,43 @@ router.get('/mongo/apis/:name', async (req, res) => {
 router.post('/mongo/apis', async (req, res) => {
   const serverId = req.params.id;
   const name = apiName(req.body?.name);
-  const database = String(req.body?.database || '').trim();
-  if (!DB_RE.test(database)) throw new HttpError(400, 'Invalid database name');
   const domain = req.body?.domain ? nginx.validDomain(req.body.domain) : null;
-  const exists = await ssh.exec(serverId, `[ -e ${q(dir(name))} ] && echo EXISTS`);
-  if (exists.stdout.includes('EXISTS')) throw new HttpError(409, `${dir(name)} already exists. Pick another name.`);
-  const port = await freePort(serverId);
+
+  // Check everything first, so a missing requirement never leaves a half-made API behind.
+  const pre = await ssh.exec(
+    serverId,
+    `command -v node >/dev/null && echo HAS_NODE; command -v npm >/dev/null && echo HAS_NPM; command -v pm2 >/dev/null && echo HAS_PM2
+[ -e ${q(dir(name))} ] && echo DIR_EXISTS; [ -f ${q(configPath(name))} ] && echo HAS_CONFIG
+command -v pm2 >/dev/null && pm2 jlist 2>/dev/null | grep -qF '"name":"${name}"' && echo IN_PM2`,
+  );
+  const has = (flag) => pre.stdout.includes(flag);
+  // A folder with api.config.json but no PM2 process is an earlier attempt that did not finish:
+  // resume it, keeping its collections and keys.
+  const resume = has('HAS_CONFIG') && !has('IN_PM2');
+  if (has('DIR_EXISTS') && !resume) {
+    throw new HttpError(409, has('IN_PM2') ? `An API named "${name}" already exists.` : `${dir(name)} already exists and is not a Data API. Pick another name.`);
+  }
+  const previous = resume ? await loadConfig(serverId, name) : null;
+  const database = previous?.database || String(req.body?.database || '').trim();
+  if (!DB_RE.test(database)) throw new HttpError(400, 'Invalid database name');
+
+  const prereqSteps = [];
+  if (!has('HAS_NODE') || !has('HAS_NPM') || !has('HAS_PM2')) {
+    const missing = [!has('HAS_NODE') || !has('HAS_NPM') ? 'Node.js' : null, !has('HAS_PM2') ? 'PM2' : null].filter(Boolean).join(' and ');
+    if (!can(req.user, 'system')) {
+      throw new HttpError(400, `${missing} must be installed first (App Store). Ask the owner, or someone with the System permission.`);
+    }
+    if (!has('HAS_NODE') || !has('HAS_NPM')) prereqSteps.push({ label: 'Installing Node.js (needed by the API service)', cmd: catalog.find('nodejs').install, sudo: true });
+    prereqSteps.push({ label: 'Installing PM2 (keeps the API running)', cmd: catalog.find('pm2').install, sudo: true });
+  }
+
+  const app = resume ? JSON.parse((await readRemote(serverId, `${dir(name)}/.serverboy-app.json`)) || '{}') : {};
+  const port = app.port || (await freePort(serverId));
   const dbUser = `api_${name.replace(/-/g, '_')}`;
   const dbPassword = crypto.randomBytes(24).toString('base64url');
   const consoleKey = `sbc_${crypto.randomBytes(24).toString('base64url')}`;
   const mongoUri = `mongodb://${dbUser}:${dbPassword}@127.0.0.1:27017/${database}?authSource=${database}`;
-  const config = {
+  const config = previous || {
     name,
     database,
     cors: ['*'],
@@ -153,8 +181,9 @@ router.post('/mongo/apis', async (req, res) => {
   const cfg = { name, repo: '', branch: 'main', port, installCmd: '', buildCmd: '', startCmd: 'node server.js', domain };
   const envText = `MONGODB_URI=${mongoUri}\nSB_CONSOLE_KEY=${consoleKey}\n`;
   const steps = buildSteps(serverId, cfg, { envText, fresh: true });
+  steps.unshift(...prereqSteps);
   // Put the engine and its settings in place right after the folder is created.
-  steps.splice(1, 0, {
+  steps.splice(prereqSteps.length + 1, 0, {
     label: `Creating MongoDB user "${dbUser}" (read/write on ${database} only)`,
     fn: async (log) => {
       await mongosh(
@@ -179,8 +208,13 @@ out({ ok: 1 });`,
     steps.push({
       label: `Publishing on ${domain}`,
       fn: async (log) => {
-        await nginx.createSite(serverId, { domain, type: 'proxy', port });
-        log(`Nginx now forwards http://${domain} to the API.\n`);
+        try {
+          await nginx.createSite(serverId, { domain, type: 'proxy', port });
+          log(`Nginx now forwards http://${domain} to the API.\n`);
+        } catch (err) {
+          if (err.status !== 409) throw err;
+          log(`${domain} is already set up in Nginx.\n`);
+        }
       },
     });
     if (req.body?.https) {
@@ -193,8 +227,8 @@ out({ ok: 1 });`,
     }
   }
   steps.push({ label: 'Checking the API answers', cmd: `sleep 2; curl -s -m 10 http://127.0.0.1:${port}/health; echo` });
-  audit(req, `Created data API ${name} (database ${database})`);
-  res.json(jobs.create(serverId, `Create data API ${name}`, steps));
+  audit(req, `${resume ? 'Finished setting up' : 'Created'} data API ${name} (database ${database})`);
+  res.json(jobs.create(serverId, `${resume ? 'Finish setting up' : 'Create'} data API ${name}`, steps));
 });
 
 // ---------- collections ----------

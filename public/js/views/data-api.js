@@ -77,14 +77,21 @@ export function mountCollectionApi(el, server, dbName, col) {
         <div class="row">
           <b>${esc(info.name)}</b>
           <span class="badge ${online ? 'ok' : 'bad'}">${esc(info.status)}</span>
-          <span class="mono small">${info.url ? `<a href="${esc(info.url)}/health" target="_blank" rel="noopener">${esc(info.url)}</a>` : `private: 127.0.0.1:${info.port} on the server`}</span>
+          <span class="mono small">${info.url ? `<a href="${esc(info.url)}/health" target="_blank" rel="noopener">${esc(info.url)}</a>` : info.port ? `private: 127.0.0.1:${info.port} on the server` : 'not set up yet'}</span>
           <span class="grow"></span>
-          ${info.url ? '' : '<button class="btn-sm btn-primary" data-action="da-publish">Publish on a domain</button>'}
+          ${info.url || !info.port ? '' : '<button class="btn-sm btn-primary" data-action="da-publish">Publish on a domain</button>'}
           <button class="btn-sm" data-action="da-settings">Settings</button>
           <button class="btn-sm" data-action="da-upgrade">Update engine</button>
           <button class="btn-sm btn-danger" data-action="da-delete">Delete API</button>
         </div>
-        ${online ? '' : `<p class="small" style="color:var(--bad);margin:8px 0 0">The API service is not running. Open <a href="#/s/${server.id}/nodeapps">Node Apps</a> → ${esc(info.name)} → Logs to see why.</p>`}
+        ${
+          online
+            ? ''
+            : info.status === 'not running'
+              ? `<div class="notice warn" style="margin:10px 0 0">The setup of this API did not finish (for example Node.js or PM2 was missing).
+                  <div class="row" style="margin-top:8px"><button class="btn-primary btn-sm" data-action="da-finish">Finish setup</button><span class="small muted">Installs anything missing and starts the API. Collections and keys are kept.</span></div></div>`
+              : `<p class="small" style="color:var(--bad);margin:8px 0 0">The API service is ${esc(info.status)}. Open <a href="#/s/${server.id}/nodeapps">Node Apps</a> → ${esc(info.name)} → Logs to see why.</p>`
+        }
       </div>
       ${c ? collectionEditor(c) : exposeCard()}
       ${keysSection()}`;
@@ -333,6 +340,18 @@ await fetch(\`${url}/api/${col}/\${id}\`, { method: "DELETE"${needsKey('delete')
       if (!(await confirmDialog(`Revoke the key "${k.label}"? Anything using it stops working within 2 seconds.`, { danger: true, confirmLabel: 'Revoke' }))) return;
       await run(null, () => api(`${base}/${info.name}/keys/${id}`, { method: 'DELETE' }), 'Key revoked');
       load();
+    },
+    'da-finish': async () => {
+      const v = await formDialog({
+        title: `Finish setting up ${info.name}`,
+        fields: [
+          { name: 'domain', label: 'Public address (optional)', value: info.domain || suggestedDomain(info.name), placeholder: 'api.example.com' },
+          { name: 'https', label: 'Get a free HTTPS certificate', type: 'checkbox', value: true },
+        ],
+        submitLabel: 'Finish setup',
+        submit: (x) => api(base, { method: 'POST', body: { name: info.name, database: dbName, domain: x.domain.trim(), https: x.https } }),
+      });
+      if (v?.id) showJob(server.id, v, { onDone: load });
     },
     'da-publish': async () => {
       const job = await formDialog({
