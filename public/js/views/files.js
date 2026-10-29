@@ -17,6 +17,7 @@ export async function render(el, { server }) {
   let cwd = sessionStorage.getItem(key);
   if (!cwd) cwd = (await api(`${base}/files/home`)).path;
   let entries = [];
+  let rootDir = '/'; // team members cannot go above /var/www
 
   el.innerHTML = `
     <div class="page-head">
@@ -45,6 +46,7 @@ export async function render(el, { server }) {
     try {
       const r = await api(`${base}/files/list?path=${encodeURIComponent(path)}`);
       cwd = r.path;
+      rootDir = r.root || '/';
       entries = r.entries;
       sessionStorage.setItem(key, cwd);
       draw();
@@ -62,7 +64,7 @@ export async function render(el, { server }) {
       <div class="table-wrap"><table>
         <thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Perms</th><th>Owner</th><th></th></tr></thead>
         <tbody>
-          ${cwd !== '/' ? `<tr><td colspan="6"><span class="file-name" data-action="go" data-path="${esc(parent(cwd))}">↰ ..</span></td></tr>` : ''}
+          ${cwd !== rootDir ? `<tr><td colspan="6"><span class="file-name" data-action="go" data-path="${esc(parent(cwd))}">↰ ..</span></td></tr>` : ''}
           ${entries
             .map((e, i) => {
               const p = join(cwd, e.name);

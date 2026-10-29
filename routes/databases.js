@@ -6,10 +6,49 @@ const ssh = require('../lib/ssh');
 const store = require('../lib/store');
 const jobs = require('../lib/jobs');
 const { mongosh } = require('../lib/mongosh');
+const scope = require('../lib/scope');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1024 * 1024 * 1024 } });
+
+// Which database each route touches, and the access level it needs (see lib/scope.js).
+// 'all' = only for users who may use every database.
+const DB_RULES = [
+  ['POST', /^\/mysql\/databases$/, () => ['mysql', null, 'all']],
+  ['DELETE', /^\/mysql\/databases\/([^/]+)$/, () => ['mysql', null, 'all']],
+  ['GET', /^\/mysql\/databases\/([^/]+)\/(tables|export)(\/.*)?$/, (m) => ['mysql', m[1], 'view']],
+  ['POST', /^\/mysql\/databases\/([^/]+)\/import$/, (m) => ['mysql', m[1], 'edit']],
+  ['*', /^\/mysql\/(users|query)$/, () => ['mysql', null, 'all']],
+  ['DELETE', /^\/mongo\/databases\/([^/]+)$/, () => ['mongo', null, 'all']],
+  ['GET', /^\/mongo\/databases\/([^/]+)\/collections$/, (m) => ['mongo', m[1], 'view']],
+  ['*', /^\/mongo\/databases\/([^/]+)\/collections(\/[^/]+)?$/, (m) => ['mongo', m[1], 'edit']],
+  ['POST', /^\/mongo\/find$/, (m, b) => ['mongo', b.db, 'view']],
+  ['POST', /^\/mongo\/(insert|update|delete)$/, (m, b) => ['mongo', b.db, 'edit']],
+  ['*', /^\/mongo\/users$/, (m, b, method) => (method === 'GET' ? null : ['mongo', b.db, 'edit'])],
+];
+
+router.use((req, res, next) => {
+  for (const [method, re, rule] of DB_RULES) {
+    const m = req.path.match(re);
+    if (!m || (method !== '*' && method !== req.method)) continue;
+    const r = rule(m, req.body || {}, req.method);
+    if (r) {
+      const [engine, name, need] = r;
+      if (need === 'all') scope.requireDb(req, engine, null, 'all');
+      else scope.requireDb(req, engine, decodeURIComponent(String(name || '')), need);
+    }
+    break;
+  }
+  next();
+});
+
+// MongoDB filters from team members must not run JavaScript on the database server.
+function noJsOperators(req, text) {
+  if (!req.user.isOwner && /"\$(where|function|accumulator)"\s*:/.test(String(text || ''))) {
+    throw new HttpError(400, 'JavaScript operators ($where, $function) are not allowed');
+  }
+}
 
 const IDENT_RE = /^[A-Za-z0-9_]{1,64}$/;
 const MONGO_NAME_RE = /^[A-Za-z0-9_.-]{1,64}$/;
@@ -63,7 +102,22 @@ router.get('/mysql/databases', async (req, res) => {
      GROUP BY s.schema_name ORDER BY s.schema_name`,
   );
   const { rows } = parseBatch(out);
-  res.json(rows.map(([name, size, tables]) => ({ name, size: Number(size), tables: Number(tables), system: SYSTEM_MYSQL_DBS.has(name) })));
+  res.json(
+    rows
+      .filter(([name]) => scope.canSeeDb(req.user, req.params.id, 'mysql', name))
+      .map(([name, size, tables]) => ({ name, size: Number(size), tables: Number(tables), system: SYSTEM_MYSQL_DBS.has(name), access: scope.dbLevel(req.user, req.params.id, 'mysql', name) })),
+  );
+});
+
+// Browse a table without writing SQL (the only way for users limited to specific databases,
+// because the SQL console runs as the database root user).
+router.get('/mysql/databases/:name/tables/:table/rows', async (req, res) => {
+  const name = ident(req.params.name, 'database name');
+  const table = ident(req.params.table, 'table name');
+  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 1000);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  const result = parseBatch(await mysql(req.params.id, `SELECT * FROM \`${name}\`.\`${table}\` LIMIT ${limit} OFFSET ${offset}`));
+  res.json({ ...result, totalRows: result.rows.length, truncated: false, limit, offset });
 });
 
 router.post('/mysql/databases', async (req, res) => {
@@ -188,7 +242,11 @@ grep -Eq '^\\s*authorization:\\s*enabled' /etc/mongod.conf 2>/dev/null && echo a
 
 router.get('/mongo/databases', async (req, res) => {
   const result = await mongosh(req.params.id, 'out(db.adminCommand({ listDatabases: 1 }).databases);');
-  res.json(result.map((d) => ({ name: d.name, size: d.sizeOnDisk, system: ['admin', 'local', 'config'].includes(d.name) })));
+  res.json(
+    result
+      .filter((d) => scope.canSeeDb(req.user, req.params.id, 'mongo', d.name))
+      .map((d) => ({ name: d.name, size: d.sizeOnDisk, system: ['admin', 'local', 'config'].includes(d.name), access: scope.dbLevel(req.user, req.params.id, 'mongo', d.name) })),
+  );
 });
 
 router.delete('/mongo/databases/:db', async (req, res) => {
@@ -238,6 +296,8 @@ function ejson(text, fallback = '{}') {
 }
 
 router.post('/mongo/find', async (req, res) => {
+  noJsOperators(req, req.body?.filter);
+  noJsOperators(req, req.body?.sort);
   const coll = collectionRef(req.body);
   const limit = Math.min(Math.max(Number(req.body?.limit) || 20, 1), 500);
   const skip = Math.max(Number(req.body?.skip) || 0, 0);
@@ -267,6 +327,7 @@ out(${coll}.replaceOne({ _id: doc._id }, doc));`,
 });
 
 router.post('/mongo/delete', async (req, res) => {
+  noJsOperators(req, req.body?.filter);
   const coll = collectionRef(req.body);
   const filterText = String(req.body?.filter || '').trim();
   if (!filterText || filterText === '{}') throw new HttpError(400, 'A filter is required to delete documents');
@@ -276,7 +337,11 @@ router.post('/mongo/delete', async (req, res) => {
 
 router.get('/mongo/users', async (req, res) => {
   const result = await mongosh(req.params.id, 'out(db.adminCommand({ usersInfo: { forAllDBs: true } }).users);');
-  res.json(result.map((u) => ({ user: u.user, db: u.db, roles: u.roles.map((r) => `${r.role}@${r.db}`) })));
+  res.json(
+    result
+      .filter((u) => scope.canSeeDb(req.user, req.params.id, 'mongo', u.db))
+      .map((u) => ({ user: u.user, db: u.db, roles: u.roles.map((r) => `${r.role}@${r.db}`) })),
+  );
 });
 
 router.post('/mongo/users', async (req, res) => {

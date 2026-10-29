@@ -1,4 +1,4 @@
-import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, onAction, loadingHtml, errorHtml, can } from '../ui.js';
+import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, onAction, loadingHtml, errorHtml, can, hasAll } from '../ui.js';
 
 export async function render(el, { server }) {
   const base = `/servers/${server.id}`;
@@ -7,7 +7,7 @@ export async function render(el, { server }) {
   el.innerHTML = `
     <div class="page-head">
       <div><h1>Websites</h1><div class="sub">Host domains with Nginx: static sites, PHP sites, or a proxy to a Node app. Free SSL included.</div></div>
-      <button class="btn-primary" data-action="add">+ Add website</button>
+      ${hasAll('sites') ? '<button class="btn-primary" data-action="add">+ Add website</button>' : ''}
     </div>
     <div class="notice">Before adding a domain, create an <b>A record</b> at your domain registrar pointing to <span class="mono">${esc(server.host)}</span>, and allow ports <b>80</b> and <b>443</b> in the Azure VM's Networking settings.</div>
     <div class="card flush"><div id="list">${loadingHtml()}</div></div>`;
@@ -30,13 +30,13 @@ export async function render(el, { server }) {
             <td><b>${esc(s.name)}</b><div class="small muted">${s.serverNames.map(esc).join(', ')}</div></td>
             <td class="mono small">${s.proxy ? `→ ${esc(s.proxy)}` : esc(s.root || '')}</td>
             <td>${s.enabled ? '<span class="badge ok">enabled</span>' : '<span class="badge">disabled</span>'}</td>
-            <td>${s.ssl ? '<span class="badge ok">https</span>' : `<button class="btn-sm" data-action="ssl" data-i="${i}">Enable SSL</button>`}</td>
+            <td>${s.ssl ? '<span class="badge ok">https</span>' : s.access === 'view' ? '<span class="badge">no SSL</span>' : `<button class="btn-sm" data-action="ssl" data-i="${i}">Enable SSL</button>`}</td>
             <td class="actions">
               ${s.serverNames[0] && s.serverNames[0] !== '_' ? `<a class="btn btn-sm" href="${s.ssl ? 'https' : 'http'}://${esc(s.serverNames[0])}" target="_blank" rel="noopener">Visit</a>` : ''}
               ${s.root ? `<button class="btn-sm" data-action="files" data-root="${esc(s.root)}">Files</button>` : ''}
               <button class="btn-sm" data-action="config" data-i="${i}">Config</button>
-              <button class="btn-sm" data-action="toggle" data-i="${i}">${s.enabled ? 'Disable' : 'Enable'}</button>
-              <button class="btn-sm btn-danger" data-action="remove" data-i="${i}">Delete</button>
+              ${s.access === 'view' ? '<span class="badge">view only</span>' : `<button class="btn-sm" data-action="toggle" data-i="${i}">${s.enabled ? 'Disable' : 'Enable'}</button>`}
+              ${hasAll('sites') ? `<button class="btn-sm btn-danger" data-action="remove" data-i="${i}">Delete</button>` : ''}
             </td></tr>`,
           )
           .join('')}

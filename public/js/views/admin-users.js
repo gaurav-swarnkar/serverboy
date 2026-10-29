@@ -1,5 +1,6 @@
 import { api, esc, toast, run, modal, confirmDialog, onAction, randomPassword, fmtDate, session } from '../ui.js';
 import { adminHead, requireTeamDb, permissionBadges } from './admin-common.js';
+import { accessPicker, scopeSummary } from './admin-access.js';
 
 export async function render(el, { servers }) {
   el.innerHTML = `${adminHead('Users', 'Logins for your team. Each user gets a role, which decides what they can do.', '<button class="btn-primary" data-action="add" disabled>+ Add user</button>')}<div id="body"></div>`;
@@ -16,9 +17,9 @@ export async function render(el, { servers }) {
     body.innerHTML = `
       <div class="card flush">
         <div class="table-wrap"><table>
-          <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Can do</th><th>Status</th><th>Last login</th><th></th></tr></thead>
+          <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Can do</th><th>Access</th><th>Status</th><th>Last login</th><th></th></tr></thead>
           <tbody>
-            <tr><td><b>admin</b><div class="small muted">You</div></td><td class="small">${esc(session.user.email || '')}</td><td><span class="badge accent">Owner</span></td><td><span class="small">Everything</span></td><td><span class="badge ok">active</span></td><td></td><td></td></tr>
+            <tr><td><b>admin</b><div class="small muted">You</div></td><td class="small">${esc(session.user.email || '')}</td><td><span class="badge accent">Owner</span></td><td><span class="small">Everything</span></td><td class="small">All</td><td><span class="badge ok">active</span></td><td></td><td></td></tr>
             ${users
               .map(
                 (u, i) => `<tr>
@@ -26,6 +27,7 @@ export async function render(el, { servers }) {
               <td class="small">${u.email ? esc(u.email) : '<span class="muted">none</span>'}</td>
               <td>${u.roleName ? `<span class="badge">${esc(u.roleName)}</span>` : '<span class="badge">Custom</span>'}</td>
               <td>${permissionBadges(u.permissions, info)}</td>
+              <td class="small">${esc(scopeSummary(u.scope))}</td>
               <td>${u.disabled ? '<span class="badge bad">disabled</span>' : '<span class="badge ok">active</span>'}</td>
               <td class="small">${u.lastLoginAt ? fmtDate(Date.parse(u.lastLoginAt)) : '<span class="muted">never</span>'}</td>
               <td class="actions">
@@ -36,7 +38,7 @@ export async function render(el, { servers }) {
               </td></tr>`,
               )
               .join('')}
-            ${users.length ? '' : '<tr><td colspan="7" class="empty">No team members yet. Click <b>+ Add user</b>.</td></tr>'}
+            ${users.length ? '' : '<tr><td colspan="8" class="empty">No team members yet. Click <b>+ Add user</b>.</td></tr>'}
           </tbody>
         </table></div>
       </div>
@@ -73,6 +75,8 @@ export async function render(el, { servers }) {
             </select>
           </label>
           <div id="role-perms"></div>
+          <h3 style="margin:18px 0 8px">Access</h3>
+          <div id="user-access"></div>
         </form>`;
       const permsEl = box.querySelector('#role-perms');
       const drawPerms = () => {
@@ -95,6 +99,7 @@ export async function render(el, { servers }) {
       };
       box.querySelector('select[name=role]').addEventListener('change', drawPerms);
       drawPerms();
+      const readScope = accessPicker(box.querySelector('#user-access'), servers, existing?.scope);
 
       let done = false;
       modal({
@@ -115,7 +120,7 @@ export async function render(el, { servers }) {
               if (full.length && !(await confirmDialog(`${full.map((p) => p.label).join(' and ')} give this person effective full control of the server. Continue?`, { confirmLabel: 'Yes, continue' }))) {
                 return false;
               }
-              const payload = { name: f.name.value, email: f.email.value, roleId, permissions: [...custom] };
+              const payload = { name: f.name.value, email: f.email.value, roleId, permissions: [...custom], scope: readScope() };
               const result = isNew
                 ? await api('/team/users', { method: 'POST', body: { ...payload, username: f.username.value, password: f.password.value } })
                 : await api(`/team/users/${existing.id}`, { method: 'PUT', body: payload });

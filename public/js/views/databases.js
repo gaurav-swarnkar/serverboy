@@ -1,4 +1,4 @@
-import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, fmtBytes, onAction, loadingHtml, errorHtml, randomPassword, can } from '../ui.js';
+import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, fmtBytes, onAction, loadingHtml, errorHtml, randomPassword, can, hasAll } from '../ui.js';
 import { mountCollectionApi, mountConnectGuide } from './data-api.js';
 
 export async function render(el, { server, rest }) {
@@ -31,22 +31,22 @@ function renderMysql(el, server) {
   el.innerHTML = `
     <div class="grid grid-2">
       <div class="card flush">
-        <div class="card-head"><h2>Databases</h2><div class="row"><button class="btn-sm" data-action="users">Users</button><button class="btn-sm btn-primary" data-action="create">+ New database</button></div></div>
+        <div class="card-head"><h2>Databases</h2><div class="row">${hasAll('databases') ? '<button class="btn-sm" data-action="users">Users</button><button class="btn-sm btn-primary" data-action="create">+ New database</button>' : ''}</div></div>
         <div id="dbs">${loadingHtml()}</div>
       </div>
-      <div class="card">
+      ${hasAll('databases') ? `<div class="card">
         <h2>SQL query</h2>
         <form id="sql-form">
           <div class="row" style="margin-bottom:8px"><select name="database" style="width:auto"><option value="">(no database)</option></select></div>
           <textarea name="sql" rows="6" placeholder="SELECT * FROM users LIMIT 20;"></textarea>
           <div class="row" style="margin-top:8px"><button class="btn-primary">Run</button><span class="small muted">Runs as the database root user. Be careful with DELETE / DROP.</span></div>
         </form>
-      </div>
+      </div>` : `<div class="card"><h2>Browse data</h2><p class="muted" style="margin:0">Click <b>Tables</b> next to a database, then <b>Browse</b>. The SQL console is only for users with access to all databases, because it runs as the database root user.</p></div>`}
     </div>
     <div id="result" style="margin-top:16px"></div>`;
 
   const dbsEl = el.querySelector('#dbs');
-  const select = el.querySelector('select[name=database]');
+  const select = el.querySelector('select[name=database]') || document.createElement('select');
   const resultEl = el.querySelector('#result');
 
   async function load() {
@@ -61,8 +61,8 @@ function renderMysql(el, server) {
             <td class="actions">
               <button class="btn-sm" data-action="tables" data-name="${esc(d.name)}">Tables</button>
               <a class="btn btn-sm" href="/api${base}/databases/${encodeURIComponent(d.name)}/export" download>Export</a>
-              <button class="btn-sm" data-action="import" data-name="${esc(d.name)}">Import</button>
-              <button class="btn-sm btn-danger" data-action="drop" data-name="${esc(d.name)}">Drop</button>
+              ${d.access === 'edit' ? `<button class="btn-sm" data-action="import" data-name="${esc(d.name)}">Import</button>` : ''}
+              ${hasAll('databases') ? `<button class="btn-sm btn-danger" data-action="drop" data-name="${esc(d.name)}">Drop</button>` : ''}
             </td></tr>`,
           )
           .join('')}
@@ -75,10 +75,13 @@ function renderMysql(el, server) {
     }
   }
 
-  async function query(database, sql) {
+  // Without SQL access, browsing a table uses the read-only rows endpoint instead of a query.
+  async function query(database, sql, table) {
     resultEl.innerHTML = loadingHtml('Running query…');
     try {
-      const r = await api(`${base}/query`, { method: 'POST', body: { database, sql } });
+      const r = table
+        ? await api(`${base}/databases/${encodeURIComponent(database)}/tables/${encodeURIComponent(table)}/rows?limit=100`)
+        : await api(`${base}/query`, { method: 'POST', body: { database, sql } });
       if (!r.columns.length) {
         resultEl.innerHTML = '<div class="notice">Query OK (no rows returned).</div>';
         load();
@@ -95,7 +98,7 @@ function renderMysql(el, server) {
     }
   }
 
-  el.querySelector('#sql-form').addEventListener('submit', (e) => query(e.target.database.value, e.target.sql.value));
+  el.querySelector('#sql-form')?.addEventListener('submit', (e) => query(e.target.database.value, e.target.sql.value));
 
   onAction(el, {
     create: async () => {
@@ -141,6 +144,7 @@ function renderMysql(el, server) {
           const t = e.target.closest('[data-browse]')?.dataset.browse;
           if (!t) return;
           m.close();
+          if (!hasAll('databases')) return query(name, null, t);
           select.value = name;
           const sql = `SELECT * FROM \`${t}\` LIMIT 100;`;
           el.querySelector('textarea[name=sql]').value = sql;
@@ -217,12 +221,13 @@ function renderMysql(el, server) {
 function renderMongo(el, server) {
   const base = `/servers/${server.id}/mongo`;
   let dbs = [];
+  const canEditDb = (name) => hasAll('databases') || dbs.find((d) => d.name === name)?.access === 'edit';
   let current = { db: null, collection: null, skip: 0 };
 
   el.innerHTML = `<div id="mongo-status"></div>
     <div class="grid" style="grid-template-columns: minmax(240px, 320px) 1fr; align-items:start">
       <div class="card flush">
-        <div class="card-head"><h2>Databases</h2><button class="btn-sm btn-primary" data-action="newDb">+ New</button></div>
+        <div class="card-head"><h2>Databases</h2>${hasAll('databases') ? '<button class="btn-sm btn-primary" data-action="newDb">+ New</button>' : ''}</div>
         <div id="tree">${loadingHtml()}</div>
       </div>
       <div id="docs" class="card"><div class="empty">Select a collection to browse its documents.</div></div>
@@ -261,7 +266,8 @@ function renderMongo(el, server) {
           <div class="row" style="padding:8px 12px">
             <span class="file-name grow" data-action="openDb" data-db="${esc(d.name)}">⛁ <b>${esc(d.name)}</b></span>
             <span class="small muted">${fmtBytes(d.size)}</span>
-            ${d.system ? '' : `<button class="btn-sm btn-ghost" title="Drop database" data-action="dropDb" data-db="${esc(d.name)}">✕</button>`}
+            ${d.system || !hasAll('databases') ? '' : `<button class="btn-sm btn-ghost" title="Drop database" data-action="dropDb" data-db="${esc(d.name)}">✕</button>`}
+            ${d.access === 'view' ? '<span class="badge">view</span>' : ''}
           </div>
           <div data-cols="${esc(d.name)}"></div>
         </div>`,
@@ -286,7 +292,7 @@ function renderMongo(el, server) {
       const cols = await api(`${base}/databases/${encodeURIComponent(db)}/collections`);
       box.innerHTML = `${cols
         .map((c) => `<div class="row" style="padding:4px 12px 4px 32px"><span class="file-name grow" data-action="openCol" data-db="${esc(db)}" data-col="${esc(c.name)}">▤ ${esc(c.name)}</span><span class="small muted">${c.count ?? ''}</span></div>`)
-        .join('')}<div style="padding:4px 12px 8px 32px"><button class="btn-sm" data-action="newCol" data-db="${esc(db)}">+ Collection</button></div>`;
+        .join('')}${canEditDb(db) ? `<div style="padding:4px 12px 8px 32px"><button class="btn-sm" data-action="newCol" data-db="${esc(db)}">+ Collection</button></div>` : ''}`;
     } catch (err) {
       box.innerHTML = errorHtml(err);
     }
@@ -296,8 +302,9 @@ function renderMongo(el, server) {
     current.tab = tab;
     docsEl.innerHTML = `
       <div class="row" style="margin-bottom:6px"><h2 class="grow" style="margin:0">${esc(current.db)}.${esc(current.collection)}</h2>
-        ${tab === 'docs' ? `<button class="btn-sm" data-action="insert">+ Insert document</button>
-        <button class="btn-sm btn-danger" data-action="dropCol">Drop collection</button>` : ''}</div>
+        ${tab === 'docs' && canEditDb(current.db) ? `<button class="btn-sm" data-action="insert">+ Insert document</button>
+        <button class="btn-sm btn-danger" data-action="dropCol">Drop collection</button>` : ''}
+        ${canEditDb(current.db) ? '' : '<span class="badge">view only</span>'}</div>
       <div class="tabs">
         <button class="${tab === 'docs' ? 'active' : ''}" data-action="colTab" data-tab="docs">Documents</button>
         <button class="${tab === 'api' ? 'active' : ''}" data-action="colTab" data-tab="api">API</button>
@@ -305,7 +312,7 @@ function renderMongo(el, server) {
       </div>
       <div id="col-tab"></div>`;
     const tabEl = docsEl.querySelector('#col-tab');
-    if (tab === 'api') return mountCollectionApi(tabEl, server, current.db, current.collection);
+    if (tab === 'api') return mountCollectionApi(tabEl, server, current.db, current.collection, canEditDb(current.db));
     if (tab === 'connect') return mountConnectGuide(tabEl, server, current.db, current.collection);
     tabEl.innerHTML = `
       <form id="find-form" class="row" style="margin-bottom:10px">
@@ -337,8 +344,8 @@ function renderMongo(el, server) {
           .map(
             (d, i) => `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden">
             <div class="row" style="padding:4px 8px;background:var(--panel-2);justify-content:flex-end">
-              <button class="btn-sm btn-ghost" data-action="editDoc" data-i="${i}">Edit</button>
-              <button class="btn-sm btn-ghost btn-danger" data-action="deleteDoc" data-i="${i}">Delete</button></div>
+              ${canEditDb(current.db) ? `<button class="btn-sm btn-ghost" data-action="editDoc" data-i="${i}">Edit</button>
+              <button class="btn-sm btn-ghost btn-danger" data-action="deleteDoc" data-i="${i}">Delete</button>` : ''}</div>
             <pre class="mono small" style="margin:0;padding:8px 12px;overflow:auto;max-height:300px">${esc(JSON.stringify(d, null, 2))}</pre></div>`,
           )
           .join('') || '<div class="empty">No documents</div>'}`;

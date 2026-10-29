@@ -143,6 +143,14 @@ Serverboy starts with two roles you can edit: **Developer** (Databases, Websites
 
 ⚠ *Node apps*, *Terminal* and *System* run commands as the server's SSH user (who can use sudo), so they are effectively full server access. Only give them to people you would give the server password to.
 
+**Access to specific websites and databases.** In a user's dialog, under **Access**, choose *All websites* or *Only the ones I choose*, then give each website **View** or **Edit**. Do the same for databases. A user limited this way:
+
+- sees only those websites, their files (in the file manager and on the dashboard) and those databases; everything else is invisible;
+- with **View** can browse, read and download; with **Edit** can also change files, documents, collections, SSL and on/off, and that database's API;
+- cannot create or delete whole websites or databases, or use the MariaDB SQL console (it runs as the database root user and could reach other databases). They get a table browser instead.
+
+Access only narrows what the role allows: without the *Databases* permission, picking databases gives nothing.
+
 Permission changes, disabling and deleting a user take effect immediately (their sessions end). The activity log records logins, every change and every download (who, when, from which IP, and whether it was allowed) and keeps entries for 90 days. Passwords and file contents are never logged.
 
 ## Configuration

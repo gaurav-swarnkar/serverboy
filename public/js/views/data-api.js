@@ -26,7 +26,7 @@ function suggestedDomain(name) {
 
 // ======================= API tab =======================
 
-export function mountCollectionApi(el, server, dbName, col) {
+export function mountCollectionApi(el, server, dbName, col, canEdit = true) {
   const base = `/servers/${server.id}/mongo/apis`;
   let info = null; // API details
   let sampleFields = [];
@@ -36,7 +36,13 @@ export function mountCollectionApi(el, server, dbName, col) {
     try {
       const apis = await api(base);
       const found = apis.find((a) => a.database === dbName && !a.broken);
-      if (!found) return drawCreate();
+      if (!found) {
+        if (!canEdit) {
+          el.innerHTML = `<div class="notice">There is no API for the ${esc(dbName)} database yet. You have view access only; ask someone with edit access to create one.</div>`;
+          return;
+        }
+        return drawCreate();
+      }
       info = await api(`${base}/${found.name}`);
       const sample = await api(`/servers/${server.id}/mongo/find`, { method: 'POST', body: { db: dbName, collection: col, limit: 5 } }).catch(() => ({ docs: [] }));
       sampleFields = [...new Set(sample.docs.flatMap((d) => Object.keys(d)))].filter((f) => f !== '_id');
@@ -93,9 +99,17 @@ export function mountCollectionApi(el, server, dbName, col) {
               : `<p class="small" style="color:var(--bad);margin:8px 0 0">The API service is ${esc(info.status)}. Open <a href="#/s/${server.id}/nodeapps">Node Apps</a> → ${esc(info.name)} → Logs to see why.</p>`
         }
       </div>
-      ${c ? collectionEditor(c) : exposeCard()}
-      ${keysSection()}`;
+      ${canEdit ? '' : '<div class="notice" style="margin-bottom:12px">You have <b>view</b> access to this database: you can read the API setup and docs, but not change it.</div>'}
+      ${c ? collectionEditor(c) : canEdit ? exposeCard() : '<div class="notice">This collection is not available through the API.</div>'}
+      ${canEdit ? keysSection() : ''}`;
     if (c) bindEditor();
+    if (!canEdit) {
+      // Read-only: keep the docs, remove anything that changes the API.
+      el.querySelectorAll('[data-action^="da-"]:not([data-action="da-send"])').forEach((b) => b.remove());
+      el.querySelectorAll('select[data-endpoint], #da-hidden, #da-readonly, #da-required, #da-timestamps').forEach((x) => (x.disabled = true));
+      const auth = el.querySelector('#da-try-auth option[value=console]');
+      if (auth) auth.remove();
+    }
   }
 
   function exposeCard() {

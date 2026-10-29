@@ -282,3 +282,9 @@ export function can(permission) {
   if (permission === 'owner') return false;
   return !permission || u.permissions.includes(permission);
 }
+
+// Whether the user may use every website / database ('sites' | 'databases'), not just chosen ones.
+export function hasAll(kind) {
+  const u = session.user;
+  return Boolean(u) && (u.isOwner || !Array.isArray(u.scope?.[kind]));
+}

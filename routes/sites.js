@@ -4,15 +4,23 @@ const express = require('express');
 const ssh = require('../lib/ssh');
 const nginx = require('../lib/nginx');
 const jobs = require('../lib/jobs');
+const scope = require('../lib/scope');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
 
 router.get('/sites', async (req, res) => {
-  res.json(await nginx.listSites(req.params.id));
+  const r = await nginx.listSites(req.params.id);
+  // Users limited to specific websites only see those, with their access level.
+  r.sites = r.sites
+    .filter((site) => scope.canSeeSite(req.user, req.params.id, site.name))
+    .map((site) => ({ ...site, access: scope.siteLevel(req.user, req.params.id, site.name) }));
+  r.canCreate = scope.isAll(req.user, 'sites');
+  res.json(r);
 });
 
 router.post('/sites', async (req, res) => {
+  scope.requireSite(req, null, 'all');
   const body = req.body || {};
   const aliases = String(body.aliases || '')
     .split(/[\s,]+/)
@@ -21,6 +29,7 @@ router.post('/sites', async (req, res) => {
 });
 
 router.get('/sites/:name/config', async (req, res) => {
+  scope.requireSite(req, req.params.name, 'view');
   const file = nginx.siteFile(req.params.name);
   const buf = await ssh.readFile(req.params.id, file);
   res.json({ content: buf.toString('utf8') });
@@ -42,6 +51,7 @@ router.put('/sites/:name/config', async (req, res) => {
 });
 
 router.post('/sites/:name/toggle', async (req, res) => {
+  scope.requireSite(req, req.params.name, 'edit');
   const file = nginx.siteFile(req.params.name);
   const link = path.join(nginx.ENABLED, path.basename(file));
   const cmd = req.body?.enabled ? `ln -sf ${q(file)} ${q(link)}` : `rm -f ${q(link)}`;
@@ -52,6 +62,7 @@ router.post('/sites/:name/toggle', async (req, res) => {
 });
 
 router.delete('/sites/:name', async (req, res) => {
+  scope.requireSite(req, req.params.name, 'all');
   const file = nginx.siteFile(req.params.name);
   const name = path.basename(file);
   const serverId = req.params.id;
@@ -68,6 +79,7 @@ router.delete('/sites/:name', async (req, res) => {
 });
 
 router.post('/sites/:name/ssl', async (req, res) => {
+  scope.requireSite(req, req.params.name, 'edit');
   const file = nginx.siteFile(req.params.name);
   const email = String(req.body?.email || '').trim();
   if (!/^[^\s@'"]+@[^\s@'"]+\.[^\s@'"]+$/.test(email)) throw new HttpError(400, "Enter a valid email (Let's Encrypt sends expiry notices to it)");

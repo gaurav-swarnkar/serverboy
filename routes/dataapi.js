@@ -13,6 +13,7 @@ const { mongosh } = require('../lib/mongosh');
 const { buildSteps, readRemote } = require('./nodeapps');
 const catalog = require('../lib/catalog');
 const { can } = require('../lib/permissions');
+const scope = require('../lib/scope');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
@@ -61,6 +62,17 @@ function audit(req, action) {
   team.audit({ user: req.user.username, ip: req.ip, action, server: undefined });
 }
 
+// An API belongs to one database, so it follows that database's access (lib/scope.js):
+// view to see it, edit to change it.
+router.use('/mongo/apis/:name', async (req, res, next) => {
+  if (scope.isAll(req.user, 'databases')) return next();
+  const cfg = await loadConfig(req.params.id, req.params.name);
+  // A test request sent as "the public" (no key) can only do what anyone on the internet can.
+  const publicTest = req.method === 'POST' && req.path === '/test' && req.body?.auth !== 'console' && req.body?.auth !== 'key';
+  scope.requireDb(req, 'mongo', cfg.database, req.method === 'GET' || publicTest ? 'view' : 'edit');
+  next();
+});
+
 // ---------- list / details ----------
 
 router.get('/mongo/apis', async (req, res) => {
@@ -103,7 +115,7 @@ echo "##PM2"; command -v pm2 >/dev/null && pm2 jlist 2>/dev/null | tail -1; echo
       apis.push({ name, broken: true });
     }
   }
-  res.json(apis);
+  res.json(apis.filter((a) => a.broken ? scope.isAll(req.user, 'databases') : scope.canSeeDb(req.user, req.params.id, 'mongo', a.database)));
 });
 
 router.get('/mongo/apis/:name', async (req, res) => {
@@ -152,6 +164,7 @@ command -v pm2 >/dev/null && pm2 jlist 2>/dev/null | grep -qF '"name":"${name}"'
   const previous = resume ? await loadConfig(serverId, name) : null;
   const database = previous?.database || String(req.body?.database || '').trim();
   if (!DB_RE.test(database)) throw new HttpError(400, 'Invalid database name');
+  scope.requireDb(req, 'mongo', database, 'edit');
 
   const prereqSteps = [];
   if (!has('HAS_NODE') || !has('HAS_NPM') || !has('HAS_PM2')) {

@@ -173,7 +173,7 @@ input, select, textarea {
   border: 1px solid var(--border); border-radius: 7px; padding: 7px 10px; width: 100%;
 }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
-input[type=checkbox] { width: auto; }
+input[type=checkbox], input[type=radio] { width: auto; }
 textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
 label.field { display: block; margin-bottom: 12px; }
 label.field > span { display: block; font-weight: 600; font-size: 12.5px; margin-bottom: 4px; }
@@ -296,3 +296,6 @@ details > summary { cursor: pointer; margin: 10px 0 6px; }
 .badge.method-post { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 .badge.method-patch, .badge.method-put { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .badge.method-delete { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+.access-block { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.access-list { max-height: 240px; overflow-y: auto; }
+.access-list td { padding: 5px 8px; }

@@ -66,8 +66,8 @@ router.post('/team/users', async (req, res) => {
 });
 
 router.put('/team/users/:userId', async (req, res) => {
-  const { name, email, roleId, permissions, disabled } = req.body || {};
-  const user = await team.updateUser(req.params.userId, { name, email, roleId, permissions, disabled });
+  const { name, email, roleId, permissions, scope, disabled } = req.body || {};
+  const user = await team.updateUser(req.params.userId, { name, email, roleId, permissions, scope, disabled });
   if (user.disabled) auth.dropSessionsFor(user.id);
   team.audit({
     user: req.user.username,
