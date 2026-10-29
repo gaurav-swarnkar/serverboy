@@ -95,7 +95,7 @@ Each app lives in `/var/www/<name>`, owned by your SSH user, with its settings i
 
 ## Data APIs (MongoDB collections over HTTPS)
 
-Databases → MongoDB → pick a collection → **API** tab.
+Hosting → **APIs** (or Databases → MongoDB → a collection → **API ↗**, which opens it in a new browser tab). Each API has its own page: a collections list with **Endpoints & rules**, **Try it** (with request history and copy-as-curl) and **Docs** per collection, plus **API keys** and **Settings** (CORS, rate limit, address, engine update, delete).
 
 1. **Create the API service** (once per database). Serverboy installs a small Node.js service in `/var/www/<name>` (run by PM2, visible under Node Apps), gives it its own MongoDB user that can only access that database, and optionally publishes it on a domain with HTTPS.
 2. **Open the collection** with a preset, then set each endpoint to *Off*, *Public* or *API key needed*:

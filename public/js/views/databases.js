@@ -1,5 +1,5 @@
 import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, fmtBytes, onAction, loadingHtml, errorHtml, randomPassword, can, hasAll } from '../ui.js';
-import { mountCollectionApi, mountConnectGuide } from './data-api.js';
+import { mountApiSummary, mountConnectGuide, apiPageUrl } from './data-api.js';
 
 export async function render(el, { server, rest }) {
   const tab = rest[0] === 'mongo' ? 'mongo' : 'mysql';
@@ -304,7 +304,8 @@ function renderMongo(el, server) {
       <div class="row" style="margin-bottom:6px"><h2 class="grow" style="margin:0">${esc(current.db)}.${esc(current.collection)}</h2>
         ${tab === 'docs' && canEditDb(current.db) ? `<button class="btn-sm" data-action="insert">+ Insert document</button>
         <button class="btn-sm btn-danger" data-action="dropCol">Drop collection</button>` : ''}
-        ${canEditDb(current.db) ? '' : '<span class="badge">view only</span>'}</div>
+        ${canEditDb(current.db) ? '' : '<span class="badge">view only</span>'}
+        <a class="btn btn-sm" href="${apiPageUrl(server, current.db, current.collection)}" target="_blank" rel="noopener" title="Open this collection's API in a new browser tab">API ↗</a></div>
       <div class="tabs">
         <button class="${tab === 'docs' ? 'active' : ''}" data-action="colTab" data-tab="docs">Documents</button>
         <button class="${tab === 'api' ? 'active' : ''}" data-action="colTab" data-tab="api">API</button>
@@ -312,7 +313,7 @@ function renderMongo(el, server) {
       </div>
       <div id="col-tab"></div>`;
     const tabEl = docsEl.querySelector('#col-tab');
-    if (tab === 'api') return mountCollectionApi(tabEl, server, current.db, current.collection, canEditDb(current.db));
+    if (tab === 'api') return mountApiSummary(tabEl, server, current.db, current.collection, canEditDb(current.db));
     if (tab === 'connect') return mountConnectGuide(tabEl, server, current.db, current.collection);
     tabEl.innerHTML = `
       <form id="find-form" class="row" style="margin-bottom:10px">

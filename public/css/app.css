@@ -299,3 +299,13 @@ details > summary { cursor: pointer; margin: 10px 0 6px; }
 .access-block { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
 .access-list { max-height: 240px; overflow-y: auto; }
 .access-list td { padding: 5px 8px; }
+
+/* ---------- APIs page ---------- */
+.api-ws { grid-template-columns: minmax(200px, 260px) 1fr; align-items: start; }
+.api-cols { display: flex; flex-direction: column; padding: 4px 0; }
+.api-col { display: flex; align-items: center; gap: 6px; padding: 7px 16px; color: var(--text); text-decoration: none; border-left: 3px solid transparent; }
+.api-col:hover { background: var(--panel-2); }
+.api-col.active { background: var(--panel-2); border-left-color: var(--accent); font-weight: 600; }
+@media (max-width: 820px) { .api-ws { grid-template-columns: 1fr; } }
+.ep-mode { width: 190px; }
+@media (max-width: 600px) { .ep-desc { display: none; } .ep-mode { width: auto; } }
