@@ -35,7 +35,7 @@ export async function render(el, { navigate, refreshServers }) {
 
   el.innerHTML = `
     <div class="page-head">
-      <div><h1>Servers</h1><div class="sub">Connect Serverboy to your Linux servers over SSH.</div></div>
+      <div><h1>Servers</h1><div class="sub">Choose a server to manage.</div></div>
       ${can('owner') ? '<button class="btn-primary" data-action="add">+ Add server</button>' : ''}
     </div>
     ${
@@ -62,14 +62,21 @@ export async function render(el, { navigate, refreshServers }) {
             ${can('owner') ? '<button class="btn-primary" data-action="add">+ Add server</button>' : '<p class="muted">Ask the owner to add a server.</p>'}
           </div>`
     }
-    <div class="card" style="margin-top:20px">
+    ${can('owner') ? `<div class="grid grid-2" style="margin-top:20px">
+    <div class="card">
+      <h3>Your team</h3>
+      <p class="muted" style="margin-top:0">Give developers their own logins with only the access they need.</p>
+      <div class="row"><a class="btn" href="#/admin/users">Users</a><a class="btn" href="#/admin/roles">Roles &amp; permissions</a><a class="btn" href="#/admin/activity">Activity log</a></div>
+    </div>
+    <div class="card">
       <h3>Azure checklist</h3>
       <ul class="muted" style="margin:0;padding-left:18px">
         <li>In the Azure Portal, open your VM → <b>Networking</b> and make sure inbound port <b>22 (SSH)</b> is allowed. Later add <b>80</b> and <b>443</b> for websites.</li>
         <li>Use the VM's <b>Public IP address</b> from its Overview page.</li>
         <li>Ubuntu 22.04 or 24.04 LTS is recommended; every installer here is written for Ubuntu/Debian.</li>
       </ul>
-    </div>`;
+    </div>
+    </div>` : ''}`;
 
   onAction(el, {
     add: async () => {

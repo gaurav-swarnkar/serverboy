@@ -16,7 +16,7 @@ Give it your server's IP, username and password (or SSH key), and you can:
 | **Databases** | **MariaDB:** create databases + users, browse tables, run SQL, export (`.sql.gz`) and import. **MongoDB:** browse databases/collections/documents, insert/edit/delete documents, create per-app users (gives you the connection string), and turn on authentication with one click. |
 | **Firewall** | Manage UFW rules. It always allows your SSH port before turning on, so you can't lock yourself out. |
 | **Tasks** | Live logs of every install / deployment. |
-| **Team** | Logins for your developers with per-person permissions, plus an activity log of who did what (stored in MongoDB). |
+| **Administration** | Users, roles & permissions for your team, and an activity log of who did what (stored in MongoDB). Owner only. |
 
 Installers target **Ubuntu 22.04 / 24.04** (Azure's default images) and Debian.
 
@@ -99,8 +99,9 @@ You (the **owner**) log in as `admin`. Your login is stored in `data/config.json
 Team members, their permissions and the activity log live in a `serverboy` database in MongoDB:
 
 1. Databases → MongoDB → **Connection settings**: save your MongoDB admin login (needed once, for setup).
-2. **Team** → **Create the serverboy database for me**. This creates the database and a `serverboy_app` MongoDB user that can only access that database. You can paste your own connection string instead.
-3. **+ Add team member**: pick a username and permissions, then share the login details it shows you.
+2. Account menu (top right) → **Administration** → **Users** → **Create the serverboy database**. This creates the database and a `serverboy_app` MongoDB user that can only access that database. You can paste your own connection string instead.
+3. **+ Add user**: pick a username and a **role**, then share the login details it shows you.
+4. **Roles & permissions**: tick what each role can do. Changing a role updates everyone who has it at once. Pick **Custom** on a user to give just that person their own set.
 
 | Permission | Allows |
 | --- | --- |
@@ -112,7 +113,7 @@ Team members, their permissions and the activity log live in a `serverboy` datab
 | Terminal ⚠ | Shell on the server |
 | System ⚠ | App Store, packages, firewall, updates, reboot, killing processes |
 
-The **Developer** preset is Databases + Websites + Website files + Services. Everyone can see the dashboard, the service list and task logs. Adding servers, the Team page and Serverboy's own settings are always owner-only.
+Serverboy starts with two roles you can edit: **Developer** (Databases, Websites, Website files, Services) and **Viewer** (look only). Everyone can see the dashboard, the service list and task logs. Adding servers and Administration are always owner-only.
 
 ⚠ *Node apps*, *Terminal* and *System* run commands as the server's SSH user (who can use sudo), so they are effectively full server access. Only give them to people you would give the server password to.
 
@@ -129,7 +130,7 @@ Copy `.env.example` to `.env` (it is loaded automatically by `npm start`):
 | `ADMIN_PASSWORD` | *(generated)* | Initial admin password. You can still change it under Settings; changing this value later resets the password to it. |
 | `SERVERBOY_SECRET` | *(generated)* | Key used to encrypt saved server credentials. |
 | `DATA_DIR` | `./data` | Where config and saved servers are stored. |
-| `SERVERBOY_MONGO_URI` | *(set in the Team page)* | MongoDB connection string for team accounts; overrides the one saved in the Team page. |
+| `SERVERBOY_MONGO_URI` | *(set in Administration)* | MongoDB connection string for team accounts; overrides the one saved in Administration → Settings. |
 | `TRUST_PROXY` | *(off)* | Set to `1` when running behind Nginx so the real client IP is used. |
 
 ## Security notes

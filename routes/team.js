@@ -61,18 +61,18 @@ router.get('/team/users', async (req, res) => {
 
 router.post('/team/users', async (req, res) => {
   const user = await team.createUser(req.body || {}, req.user.username);
-  team.audit({ user: req.user.username, ip: req.ip, action: `Created user ${user.username}`, permissions: user.permissions });
+  team.audit({ user: req.user.username, ip: req.ip, action: `Created user ${user.username}${user.roleName ? ` (${user.roleName})` : ''}`, permissions: user.permissions });
   res.json(user);
 });
 
 router.put('/team/users/:userId', async (req, res) => {
-  const { name, permissions, disabled } = req.body || {};
-  const user = await team.updateUser(req.params.userId, { name, permissions, disabled });
+  const { name, roleId, permissions, disabled } = req.body || {};
+  const user = await team.updateUser(req.params.userId, { name, roleId, permissions, disabled });
   if (user.disabled) auth.dropSessionsFor(user.id);
   team.audit({
     user: req.user.username,
     ip: req.ip,
-    action: `Updated user ${user.username}${user.disabled ? ' (disabled)' : ''}`,
+    action: `Updated user ${user.username}${user.roleName ? ` (${user.roleName})` : ''}${user.disabled ? ' (disabled)' : ''}`,
     permissions: user.permissions,
   });
   res.json(user);
@@ -91,6 +91,29 @@ router.delete('/team/users/:userId', async (req, res) => {
   await team.deleteUser(req.params.userId);
   auth.dropSessionsFor(req.params.userId);
   team.audit({ user: req.user.username, ip: req.ip, action: `Deleted user ${user?.username || req.params.userId}` });
+  res.json({ ok: true });
+});
+
+router.get('/team/roles', async (req, res) => {
+  res.json(await team.listRoles());
+});
+
+router.post('/team/roles', async (req, res) => {
+  const role = await team.saveRole(null, req.body || {});
+  team.audit({ user: req.user.username, ip: req.ip, action: `Created role ${role.name}`, permissions: role.permissions });
+  res.json(role);
+});
+
+router.put('/team/roles/:roleId', async (req, res) => {
+  const role = await team.saveRole(req.params.roleId, req.body || {});
+  team.audit({ user: req.user.username, ip: req.ip, action: `Updated role ${role.name}`, permissions: role.permissions });
+  res.json(role);
+});
+
+router.delete('/team/roles/:roleId', async (req, res) => {
+  const role = (await team.listRoles()).find((r) => r.id === req.params.roleId);
+  await team.deleteRole(req.params.roleId);
+  team.audit({ user: req.user.username, ip: req.ip, action: `Deleted role ${role?.name || req.params.roleId}` });
   res.json({ ok: true });
 });
 
