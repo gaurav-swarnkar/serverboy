@@ -279,3 +279,16 @@ pre.log {
   .cmdbook { height: 60vh; }
 }
 .notice mark { background: var(--accent); color: #fff; border-radius: 3px; padding: 0 3px; }
+
+/* ---------- dashboard health card ---------- */
+.hc-problems { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.hc-problem { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft); }
+.hc-problem.bad { background: var(--bad-soft); }
+.hc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.hc-tile { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--panel-2); }
+.hc-tile.bad { border-color: var(--bad); }
+.hc-tile.warn { border-color: var(--warn); }
+.hc-tile.off { opacity: .65; }
+.hc-actions { gap: 2px; margin-top: 4px; }
+.hc-actions .btn-sm { padding: 1px 6px; }
+details > summary { cursor: pointer; margin: 10px 0 6px; }

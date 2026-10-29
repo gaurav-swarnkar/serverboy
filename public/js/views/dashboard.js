@@ -1,4 +1,5 @@
 import { api, esc, fmtBytes, fmtDuration, run, confirmDialog, showJob, onAction, errorHtml, toast, can } from '../ui.js';
+import { mountHealth } from './health-card.js';
 
 function pct(used, total) {
   return total ? Math.round((used / total) * 100) : 0;
@@ -18,7 +19,9 @@ export async function render(el, { server }) {
         <button class="btn-danger" data-action="reboot">Reboot</button>` : ''}
       </div>
     </div>
+    <div id="health"></div>
     <div id="stats"><div class="loading"><span class="spinner"></span>Connecting to ${esc(server.host)}…</div></div>`;
+  const stopHealth = mountHealth(el.querySelector('#health'), server);
 
   const statsEl = el.querySelector('#stats');
   let timer = null;
@@ -93,5 +96,6 @@ export async function render(el, { server }) {
   return () => {
     stopped = true;
     clearTimeout(timer);
+    stopHealth();
   };
 }
