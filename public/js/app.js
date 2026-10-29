@@ -105,6 +105,14 @@ export async function refreshServers() {
   return state.servers;
 }
 
+function lastLogin() {
+  try {
+    return localStorage.getItem('sb-last-login') || 'admin';
+  } catch {
+    return 'admin';
+  }
+}
+
 function showLogin() {
   session.user = null;
   state.cleanup?.();
@@ -113,10 +121,10 @@ function showLogin() {
     <div class="login-wrap">
       <form class="card login">
         <div class="brand"><span class="brand-logo">▣</span> Serverboy</div>
-        <label class="field"><span>Username</span><input name="username" value="admin" autocomplete="username" required></label>
+        <label class="field"><span>Username or email</span><input name="username" value="${esc(lastLogin())}" placeholder="admin" autocomplete="username" required></label>
         <label class="field"><span>Password</span><input type="password" name="password" autocomplete="current-password" autofocus required></label>
         <button class="btn-primary" style="width:100%;justify-content:center">Log in</button>
-        <p class="muted small" style="margin-bottom:0">Owner: log in as <b>admin</b>. Team members: use the username the owner gave you.</p>
+        <p class="muted small" style="margin-bottom:0">Owner: log in as <b>admin</b>. Team members: your username or email.</p>
       </form>
     </div>`;
   const form = app.querySelector('form');
@@ -125,6 +133,11 @@ function showLogin() {
     btn.disabled = true;
     try {
       await api('/login', { method: 'POST', body: { username: form.username.value, password: form.password.value } });
+      try {
+        localStorage.setItem('sb-last-login', form.username.value.trim());
+      } catch {
+        /* private mode */
+      }
       await start();
     } catch (err) {
       toast(err.message, 'error');

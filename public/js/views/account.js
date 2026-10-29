@@ -19,6 +19,14 @@ export async function render(el) {
         <h2>Profile</h2>
         <table><tbody>
           <tr><td class="muted">Username</td><td><b>${esc(u.username)}</b></td></tr>
+          <tr><td class="muted">Email</td><td>${
+            u.isOwner
+              ? `<form id="email-form" class="row"><input name="email" type="email" value="${esc(u.email)}" placeholder="you@example.com" style="width:auto;flex:1"><button class="btn-sm">Save</button></form>
+                 <div class="small muted">Optional. Lets you log in with your email instead of "admin".</div>`
+              : u.email
+                ? `${esc(u.email)} <div class="small muted">You can log in with this or your username.</div>`
+                : '<span class="muted">none (ask the owner to add one)</span>'
+          }</td></tr>
           ${u.name ? `<tr><td class="muted">Name</td><td>${esc(u.name)}</td></tr>` : ''}
           <tr><td class="muted">Role</td><td><span class="badge accent">${esc(u.role)}</span></td></tr>
           <tr><td class="muted">You can</td><td>${
@@ -39,6 +47,10 @@ export async function render(el) {
         </form>
       </div>
     </div>`;
+  el.querySelector('#email-form')?.addEventListener('submit', async (e) => {
+    const r = await run(e.target.querySelector('button'), () => api('/account/email', { method: 'POST', body: { email: e.target.email.value } }), 'Email saved');
+    if (r) session.user.email = r.email;
+  });
   el.querySelector('#pw').addEventListener('submit', async (e) => {
     const f = e.target;
     if (f.next.value !== f.repeat.value) return toast('The new passwords do not match', 'error');
