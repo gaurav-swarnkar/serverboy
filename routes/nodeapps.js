@@ -140,6 +140,8 @@ git log -1 --format='Deployed commit %h: %s (%an, %ar)'`,
       };
       await ssh.writeFile(serverId, `${dir}/${PM2_FILE}`, JSON.stringify(pm2, null, 2), { sudo: false });
       await ssh.writeFile(serverId, `${dir}/${APP_FILE}`, JSON.stringify(cfg, null, 2), { sudo: false });
+      // .env and the PM2 file hold secrets (database passwords, keys): owner-only.
+      await ssh.exec(serverId, `touch ${q(`${dir}/.env`)} && chmod 600 ${q(`${dir}/.env`)} ${q(`${dir}/${PM2_FILE}`)}`, { check: true });
       log(`Environment variables: ${Object.keys(vars).join(', ') || '(none)'}\n`);
     },
   });
@@ -280,3 +282,6 @@ router.get('/node-apps/:name/logs', async (req, res) => {
 });
 
 module.exports = router;
+// Reused by the Data API service (routes/dataapi.js).
+module.exports.buildSteps = buildSteps;
+module.exports.readRemote = readRemote;

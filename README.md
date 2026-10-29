@@ -6,7 +6,7 @@ Give it your server's IP, username and password (or SSH key), and you can:
 
 | Page | What it does |
 | --- | --- |
-| **Dashboard** | Live CPU, memory, disk, uptime and top processes. Update all packages, reboot. |
+| **Dashboard** | A **health card** that checks essential services, every website (real HTTP check + certificate expiry) and Node apps, explains problems in plain English and offers one-click fixes for known issues. Plus live CPU, memory, disk, uptime and top processes; update all packages, reboot. |
 | **Terminal** | A full SSH terminal in the browser, with a **command book**: about 140 everyday commands in 18 sections (services, logs, Nginx, SSL, MongoDB, MariaDB, PM2, Git, Docker, firewall, disk cleanup…), each explained in plain English. Search, fill in values, then Insert or Run. Risky ones ask first, and you can save your own. |
 | **File Manager** | Browse, upload (drag & drop), download (folders as `.tar.gz`), edit, rename, delete, chmod/chown, extract `.zip`/`.tar.gz`. Falls back to sudo for root-owned files. |
 | **App Store** | One-click installs: Nginx, MongoDB 8.0, MariaDB, Redis, Node.js 22, PM2, PHP-FPM, Docker, Certbot, UFW, Fail2ban, Git. Two "quick stacks" install everything for a Node+MongoDB SaaS or a PHP+MariaDB site. Also search and install any apt package. |
@@ -14,6 +14,7 @@ Give it your server's IP, username and password (or SSH key), and you can:
 | **Websites** | Create Nginx sites (static, single-page app, PHP, or reverse proxy to an app port). Edit config with automatic `nginx -t` rollback. Free Let's Encrypt SSL in one click. |
 | **Node Apps** | Deploy a Node.js app from Git (or from uploaded files), set environment variables, run it with PM2, put it on a domain, redeploy with one click, view logs. |
 | **Databases** | **MariaDB:** create databases + users, browse tables, run SQL, export (`.sql.gz`) and import. **MongoDB:** browse databases/collections/documents, insert/edit/delete documents, create per-app users (gives you the connection string), and turn on authentication with one click. |
+| **Data APIs** | Turn a MongoDB collection into a REST API in a few clicks: choose per endpoint (list / count / get / create / update / replace / delete) whether it is off, public or needs an API key; hide, protect and require fields; manage keys; try requests; get ready-to-paste code. Each collection also has a **Connect** guide for using the database from your backend and web pages. |
 | **Firewall** | Manage UFW rules. It always allows your SSH port before turning on, so you can't lock yourself out. |
 | **Tasks** | Live logs of every install / deployment. |
 | **Administration** | Users, roles & permissions for your team, and an activity log of who did what (stored in MongoDB). Owner only. |
@@ -92,6 +93,31 @@ Private GitHub repo? Use `https://<token>@github.com/you/repo.git` with a fine-g
 
 Each app lives in `/var/www/<name>`, owned by your SSH user, with its settings in `.serverboy-app.json` and secrets in `.env`.
 
+## Data APIs (MongoDB collections over HTTPS)
+
+Databases → MongoDB → pick a collection → **API** tab.
+
+1. **Create the API service** (once per database). Serverboy installs a small Node.js service in `/var/www/<name>` (run by PM2, visible under Node Apps), gives it its own MongoDB user that can only access that database, and optionally publishes it on a domain with HTTPS.
+2. **Open the collection** with a preset, then set each endpoint to *Off*, *Public* or *API key needed*:
+
+   | Endpoint | |
+   | --- | --- |
+   | `GET /api/<collection>` | list, with `?field=value`, `?filter={json}`, `?sort=-createdAt`, `?limit=&page=`, `?fields=` |
+   | `GET /api/<collection>/count` | count |
+   | `GET /api/<collection>/:id` | one document |
+   | `POST /api/<collection>` | create |
+   | `PATCH /api/<collection>/:id` | update some fields |
+   | `PUT /api/<collection>/:id` | replace |
+   | `DELETE /api/<collection>/:id` | delete |
+
+3. **Field rules:** *hidden* fields are never returned and cannot be filtered on; *read-only* fields cannot be written; *required* fields must be present on create; optional automatic `createdAt` / `updatedAt`.
+4. **API keys** (sent as `x-api-key`) can be read-only or read/write, for all collections or chosen ones. Keys are stored only as hashes and shown once.
+5. **Settings:** allowed websites (CORS), rate limit per minute, maximum page size.
+
+Changes apply within about 2 seconds without a restart. JavaScript query operators (`$where`, `$function`) are blocked. The **Try it** box sends real requests from the server, and **How to call it** shows URLs plus `fetch` and `curl` examples for your configuration.
+
+Rule of thumb: make reading public only for data anyone may see, and never put a key that can write into web page code. Call write endpoints from your backend.
+
 ## Team accounts and permissions
 
 You (the **owner**) log in as `admin`. Your login is stored in `data/config.json` (or `/etc/serverboy.env` on a server install), **not** in MongoDB, so you can always get in, even when MongoDB is down.
@@ -166,7 +192,9 @@ lib/jobs.js          Background tasks with live logs
 lib/catalog.js       One-click installer definitions (add new apps here)
 lib/nginx.js         Nginx site templates
 lib/terminal.js      WebSocket ⇄ SSH shell bridge
-routes/*.js          REST API (system, files, databases, sites, nodeapps)
+routes/*.js          REST API (system, health, files, databases, dataapi, sites, nodeapps, team)
+templates/data-api/  The Data API service deployed for each database
+lib/health.js        Dashboard health checks, diagnosis rules and fixes
 public/              Frontend (vanilla JS modules, no build step)
 ```
 

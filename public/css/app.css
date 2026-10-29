@@ -292,3 +292,7 @@ pre.log {
 .hc-actions { gap: 2px; margin-top: 4px; }
 .hc-actions .btn-sm { padding: 1px 6px; }
 details > summary { cursor: pointer; margin: 10px 0 6px; }
+.badge.method-get { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.badge.method-post { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.badge.method-patch, .badge.method-put { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.badge.method-delete { background: var(--bad-soft); color: var(--bad); border-color: transparent; }

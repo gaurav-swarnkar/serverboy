@@ -54,6 +54,7 @@ perServer.use(require('./routes/system'));
 perServer.use(require('./routes/health'));
 perServer.use(require('./routes/files'));
 perServer.use(require('./routes/databases'));
+perServer.use(require('./routes/dataapi'));
 perServer.use(require('./routes/sites'));
 perServer.use(require('./routes/nodeapps'));
 api.use('/servers/:id', perServer);

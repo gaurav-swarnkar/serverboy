@@ -1,4 +1,5 @@
 import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, fmtBytes, onAction, loadingHtml, errorHtml, randomPassword, can } from '../ui.js';
+import { mountCollectionApi, mountConnectGuide } from './data-api.js';
 
 export async function render(el, { server, rest }) {
   const tab = rest[0] === 'mongo' ? 'mongo' : 'mysql';
@@ -291,11 +292,22 @@ function renderMongo(el, server) {
     }
   }
 
-  function drawDocsShell() {
+  function drawDocsShell(tab = 'docs') {
+    current.tab = tab;
     docsEl.innerHTML = `
-      <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">${esc(current.db)}.${esc(current.collection)}</h2>
-        <button class="btn-sm" data-action="insert">+ Insert document</button>
-        <button class="btn-sm btn-danger" data-action="dropCol">Drop collection</button></div>
+      <div class="row" style="margin-bottom:6px"><h2 class="grow" style="margin:0">${esc(current.db)}.${esc(current.collection)}</h2>
+        ${tab === 'docs' ? `<button class="btn-sm" data-action="insert">+ Insert document</button>
+        <button class="btn-sm btn-danger" data-action="dropCol">Drop collection</button>` : ''}</div>
+      <div class="tabs">
+        <button class="${tab === 'docs' ? 'active' : ''}" data-action="colTab" data-tab="docs">Documents</button>
+        <button class="${tab === 'api' ? 'active' : ''}" data-action="colTab" data-tab="api">API</button>
+        <button class="${tab === 'connect' ? 'active' : ''}" data-action="colTab" data-tab="connect">Connect</button>
+      </div>
+      <div id="col-tab"></div>`;
+    const tabEl = docsEl.querySelector('#col-tab');
+    if (tab === 'api') return mountCollectionApi(tabEl, server, current.db, current.collection);
+    if (tab === 'connect') return mountConnectGuide(tabEl, server, current.db, current.collection);
+    tabEl.innerHTML = `
       <form id="find-form" class="row" style="margin-bottom:10px">
         <input name="filter" class="mono grow" style="width:auto" placeholder='Filter, e.g. { "email": "a@b.com" }' value="${esc(current.filter || '')}">
         <input name="sort" class="mono" style="width:180px" placeholder='Sort { "_id": -1 }' value="${esc(current.sort || '')}">
@@ -348,6 +360,10 @@ function renderMongo(el, server) {
       current = { db, collection: col, skip: 0 };
       drawDocsShell();
       loadDocs();
+    },
+    colTab: ({ tab }) => {
+      drawDocsShell(tab);
+      if (tab === 'docs') loadDocs();
     },
     page: ({ dir }) => {
       current.skip = Math.max(0, current.skip + Number(dir) * 20);
