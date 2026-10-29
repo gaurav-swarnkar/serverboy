@@ -1,0 +1,301 @@
+// Command book shown next to the terminal. Ubuntu / Debian commands with plain-English help.
+// {{name}} or {{name|default}} marks a value the user is asked for before the command is inserted.
+// danger: true asks for confirmation before running.
+
+export const COMMAND_BOOK = [
+  {
+    id: 'basics',
+    title: 'Terminal basics',
+    icon: '⌨',
+    commands: [
+      { t: 'Stop the running command', cmd: '', d: 'Press Ctrl+C. Works for anything that keeps running (tail -f, ping, logs…).', key: true },
+      { t: 'Clear the screen', cmd: 'clear', d: 'Or press Ctrl+L.' },
+      { t: 'Repeat / edit earlier commands', cmd: '', d: 'Press ↑ and ↓ to go through your history. Tab completes file and command names.', key: true },
+      { t: 'Search your command history', cmd: 'history | grep "{{word}}"', d: 'Shows earlier commands that contain a word. Re-run one with !NUMBER.' },
+      { t: 'Run as administrator', cmd: 'sudo {{command}}', d: 'Put sudo in front of a command that needs admin rights. It may ask for your password (typing is invisible).' },
+      { t: 'Show help for a command', cmd: '{{command|ls}} --help | less', d: 'Most commands explain their options with --help. Press q to quit.' },
+      { t: 'Where am I?', cmd: 'pwd', d: 'Prints the folder you are in.' },
+      { t: 'Who am I logged in as?', cmd: 'whoami && id', d: 'Your username and the groups you belong to (sudo = admin).' },
+    ],
+  },
+  {
+    id: 'system',
+    title: 'System health',
+    icon: '◉',
+    commands: [
+      { t: 'OS version', cmd: 'cat /etc/os-release', d: 'Which Linux and version this server runs.' },
+      { t: 'Uptime and load', cmd: 'uptime', d: 'How long since reboot, and load averages (1, 5, 15 min). Load above the number of CPUs means it is busy.' },
+      { t: 'Live resource monitor', cmd: 'htop', d: 'Interactive CPU / memory / process view. Press q to quit. If missing: sudo apt install -y htop' },
+      { t: 'Memory usage', cmd: 'free -h', d: '"available" is what is really free. Swap use means memory is tight.' },
+      { t: 'Disk space', cmd: 'df -h', d: 'Free space per disk. Above 90% Use% needs cleaning.' },
+      { t: 'Biggest folders', cmd: 'sudo du -h --max-depth=1 {{folder|/var}} 2>/dev/null | sort -h | tail -20', d: 'Finds what is eating disk space. Run again on the biggest folder to dig deeper.' },
+      { t: 'CPU details', cmd: 'lscpu | head -20', d: 'CPU model and number of cores.' },
+      { t: 'Is a reboot needed?', cmd: '[ -f /var/run/reboot-required ] && cat /var/run/reboot-required.pkgs || echo "No reboot needed"', d: 'Some updates (like the kernel) only apply after a reboot.' },
+      { t: 'Reboot the server', cmd: 'sudo reboot', d: 'Websites and apps go offline for a minute or two.', danger: true },
+      { t: 'Who is logged in', cmd: 'w', d: 'Current SSH sessions and what they are doing.' },
+      { t: 'Recent logins', cmd: 'last -n 20', d: 'Who logged in and from which IP.' },
+      { t: 'Kernel version', cmd: 'uname -r', d: 'Useful when software says it does not support your kernel.' },
+    ],
+  },
+  {
+    id: 'files',
+    title: 'Files & folders',
+    icon: '▤',
+    commands: [
+      { t: 'List files with details', cmd: 'ls -lah', d: 'Shows hidden files, sizes, owners and permissions.' },
+      { t: 'Go to the websites folder', cmd: 'cd /var/www && ls -la', d: 'Where Serverboy puts websites and apps.' },
+      { t: 'Go to your home folder', cmd: 'cd ~', d: '' },
+      { t: 'Find files by name', cmd: 'find {{folder|/var/www}} -name "{{pattern|*.log}}" 2>/dev/null', d: 'Use * as a wildcard, e.g. *.php or config*.' },
+      { t: 'Search text inside files', cmd: 'grep -rnI "{{text}}" {{folder|.}}', d: 'Shows every file and line number containing the text (skips binary files).' },
+      { t: 'Read a file (scrollable)', cmd: 'less {{file}}', d: 'Space = next page, / = search, q = quit.' },
+      { t: 'Last lines of a file', cmd: 'tail -n 100 {{file}}', d: 'Great for log files.' },
+      { t: 'Watch a file live', cmd: 'tail -f {{file}}', d: 'New lines appear as they are written. Ctrl+C to stop.' },
+      { t: 'Edit a file', cmd: 'nano {{file}}', d: 'Ctrl+O then Enter saves, Ctrl+X exits. Use sudo nano for system files.' },
+      { t: 'Create a folder', cmd: 'mkdir -p {{folder}}', d: '-p also creates missing parent folders.' },
+      { t: 'Copy a file or folder', cmd: 'cp -a {{from}} {{to}}', d: '-a keeps permissions and copies folders recursively.' },
+      { t: 'Move or rename', cmd: 'mv {{from}} {{to}}', d: '' },
+      { t: 'Delete a folder and everything in it', cmd: 'rm -rf {{folder}}', d: 'Permanent: there is no recycle bin. Double-check the path.', danger: true },
+      { t: 'Compress a folder (.tar.gz)', cmd: 'tar -czf {{name|backup}}-$(date +%F).tar.gz {{folder}}', d: 'Makes a dated backup archive in the current folder.' },
+      { t: 'Extract a .tar.gz', cmd: 'tar -xzf {{file}}', d: '' },
+      { t: 'Extract a .zip', cmd: 'unzip {{file}} -d {{folder|.}}', d: 'If missing: sudo apt install -y unzip' },
+      { t: 'Make a folder yours', cmd: 'sudo chown -R $USER:$USER {{folder|/var/www/example.com}}', d: 'Fixes "Permission denied" when uploading or editing website files.' },
+      { t: 'Standard web permissions', cmd: 'find {{folder}} -type d -exec chmod 755 {} \\; && find {{folder}} -type f -exec chmod 644 {} \\;', d: 'Folders 755, files 644: readable by the web server, writable only by you.' },
+      { t: 'File size', cmd: 'du -sh {{path}}', d: '' },
+    ],
+  },
+  {
+    id: 'services',
+    title: 'Services',
+    icon: '⚙',
+    commands: [
+      { t: 'Is a service running?', cmd: 'systemctl status {{service|nginx}} --no-pager', d: 'Look for "active (running)". Common services: nginx, mongod, mariadb, redis-server, docker, serverboy.' },
+      { t: 'Restart a service', cmd: 'sudo systemctl restart {{service|nginx}}', d: 'Stop + start. Use after changing its configuration.' },
+      { t: 'Start / stop a service', cmd: 'sudo systemctl {{action|start}} {{service}}', d: 'action: start or stop.' },
+      { t: 'Start a service on boot', cmd: 'sudo systemctl enable --now {{service}}', d: '--now also starts it right away.' },
+      { t: 'Running services', cmd: 'systemctl list-units --type=service --state=running --no-pager', d: '' },
+      { t: 'Failed services', cmd: 'systemctl --failed --no-pager', d: 'Anything listed here crashed or could not start.' },
+      { t: "A service's logs", cmd: 'sudo journalctl -u {{service|nginx}} -n 100 --no-pager', d: 'The last 100 log lines. This is where the reason for a crash usually is.' },
+      { t: "Follow a service's logs live", cmd: 'sudo journalctl -u {{service}} -f', d: 'Ctrl+C to stop.' },
+      { t: 'All errors since boot', cmd: 'sudo journalctl -p err -b --no-pager | tail -50', d: '' },
+    ],
+  },
+  {
+    id: 'packages',
+    title: 'Install software (apt)',
+    icon: '⬇',
+    commands: [
+      { t: 'Refresh the package list', cmd: 'sudo apt update', d: 'Run this before installing anything.' },
+      { t: 'Install updates', cmd: 'sudo apt upgrade -y', d: 'Security fixes and updates for everything installed.' },
+      { t: 'Install a package', cmd: 'sudo apt install -y {{package}}', d: 'e.g. htop, unzip, git, ffmpeg, imagemagick.' },
+      { t: 'Search for a package', cmd: 'apt search {{name}} 2>/dev/null | head -40', d: '' },
+      { t: 'Is a package installed?', cmd: 'dpkg -l | grep -i {{name}}', d: 'Lines starting with "ii" are installed.' },
+      { t: 'Remove a package', cmd: 'sudo apt remove {{package}}', d: 'Keeps its configuration files. Use purge to remove those too.', danger: true },
+      { t: 'Clean up unused packages', cmd: 'sudo apt autoremove -y && sudo apt clean', d: 'Frees disk space.' },
+    ],
+  },
+  {
+    id: 'processes',
+    title: 'Processes & ports',
+    icon: '☰',
+    commands: [
+      { t: 'Top CPU users', cmd: 'ps aux --sort=-%cpu | head -15', d: '' },
+      { t: 'Top memory users', cmd: 'ps aux --sort=-%mem | head -15', d: '' },
+      { t: 'Find a process', cmd: 'pgrep -a {{name|node}}', d: 'Shows process IDs (PIDs) and their full command.' },
+      { t: 'What is using a port?', cmd: 'sudo ss -ltnp | grep :{{port|3000}}', d: 'Fixes "address already in use" errors.' },
+      { t: 'All listening ports', cmd: 'sudo ss -ltnp', d: 'Every service waiting for connections, and which program owns it.' },
+      { t: 'Stop a process', cmd: 'kill {{pid}}', d: 'Asks it to stop nicely.' },
+      { t: 'Force-kill a process', cmd: 'sudo kill -9 {{pid}}', d: 'Last resort: the process gets no chance to save anything.', danger: true },
+    ],
+  },
+  {
+    id: 'network',
+    title: 'Network',
+    icon: '⇄',
+    commands: [
+      { t: "This server's public IP", cmd: 'curl -4 -s https://ifconfig.me; echo', d: '' },
+      { t: 'Test a website from the server', cmd: 'curl -I {{url|http://localhost}}', d: 'Shows the response headers. 200 = OK, 301/302 = redirect, 404 = not found, 502 = app behind Nginx is down.' },
+      { t: 'Does a domain point here?', cmd: 'getent hosts {{domain}}', d: 'Should print this server\'s public IP. If not, fix the A record at your domain registrar.' },
+      { t: 'Ping a host', cmd: 'ping -c 4 {{host|8.8.8.8}}', d: 'Checks internet connectivity.' },
+      { t: 'Can I reach a port?', cmd: 'nc -zv -w 5 {{host}} {{port}}', d: '"succeeded" means the port is open.' },
+      { t: 'Network interfaces and IPs', cmd: 'ip -brief address', d: '' },
+    ],
+  },
+  {
+    id: 'firewall',
+    title: 'Firewall (UFW)',
+    icon: '⛨',
+    commands: [
+      { t: 'Firewall status and rules', cmd: 'sudo ufw status numbered', d: 'Remember: Azure also has its own firewall (VM → Networking). A port must be open in both.' },
+      { t: 'Allow a port', cmd: 'sudo ufw allow {{port}}/tcp', d: '' },
+      { t: 'Allow websites (80 + 443)', cmd: "sudo ufw allow 'Nginx Full'", d: '' },
+      { t: 'Allow only one IP to a port', cmd: 'sudo ufw allow from {{ip}} to any port {{port|22}} proto tcp', d: 'e.g. SSH only from your office IP.' },
+      { t: 'Delete a rule', cmd: 'sudo ufw delete {{number}}', d: 'Use the number from "ufw status numbered".', danger: true },
+      { t: 'Turn the firewall on', cmd: 'sudo ufw allow OpenSSH && sudo ufw enable', d: 'Allows SSH first so you are not locked out.', danger: true },
+    ],
+  },
+  {
+    id: 'nginx',
+    title: 'Nginx (websites)',
+    icon: '◎',
+    commands: [
+      { t: 'Check the configuration', cmd: 'sudo nginx -t', d: 'Always run before reloading. It tells you the file and line of any mistake.' },
+      { t: 'Apply configuration changes', cmd: 'sudo nginx -t && sudo systemctl reload nginx', d: 'Reload only happens if the test passes. No downtime.' },
+      { t: 'List enabled sites', cmd: 'ls -l /etc/nginx/sites-enabled/', d: '' },
+      { t: "Edit a site's config", cmd: 'sudo nano /etc/nginx/sites-available/{{domain}}', d: 'Then run "Apply configuration changes".' },
+      { t: 'Enable a site', cmd: 'sudo ln -s /etc/nginx/sites-available/{{domain}} /etc/nginx/sites-enabled/ && sudo nginx -t && sudo systemctl reload nginx', d: '' },
+      { t: 'Live visitor log', cmd: 'sudo tail -f /var/log/nginx/access.log', d: 'Every request as it happens. Ctrl+C to stop.' },
+      { t: 'Recent errors', cmd: 'sudo tail -n 50 /var/log/nginx/error.log', d: '' },
+      { t: "A site's own error log", cmd: 'sudo tail -n 50 /var/log/nginx/{{domain}}.error.log', d: 'Sites created by Serverboy have their own log files.' },
+    ],
+  },
+  {
+    id: 'ssl',
+    title: 'SSL certificates',
+    icon: '🔒',
+    commands: [
+      { t: 'Get a free certificate', cmd: 'sudo certbot --nginx -d {{domain}}', d: 'The domain must already point to this server and ports 80 + 443 must be open.' },
+      { t: 'List certificates and expiry', cmd: 'sudo certbot certificates', d: '' },
+      { t: 'Test automatic renewal', cmd: 'sudo certbot renew --dry-run', d: 'Certificates renew by themselves; this checks that renewal will work.' },
+      { t: "Check a site's certificate dates", cmd: 'echo | openssl s_client -servername {{domain}} -connect {{domain}}:443 2>/dev/null | openssl x509 -noout -dates', d: '' },
+    ],
+  },
+  {
+    id: 'mongodb',
+    title: 'MongoDB',
+    icon: '⛁',
+    commands: [
+      { t: 'Is MongoDB running?', cmd: 'systemctl status mongod --no-pager', d: '' },
+      { t: 'Why did MongoDB fail?', cmd: "sudo tail -n 300 /var/log/mongodb/mongod.log | grep -E '\"s\":\"(E|F)\"' | tail -5", d: 'Shows the latest errors from MongoDB\'s own log.' },
+      { t: 'Open the MongoDB shell (as admin)', cmd: 'mongosh -u {{user|admin}} --authenticationDatabase admin', d: 'Asks for the password. Inside: show dbs, use mydb, show collections, db.users.find().limit(5), exit.' },
+      { t: 'Open the MongoDB shell (no password)', cmd: 'mongosh', d: 'Only works while authentication is off.' },
+      { t: 'Back up a database', cmd: 'mongodump -u {{user|admin}} --authenticationDatabase admin --db {{database}} --archive={{database}}-$(date +%F).gz --gzip', d: 'Creates one compressed file in the current folder. Asks for the password.' },
+      { t: 'Restore a backup', cmd: 'mongorestore -u {{user|admin}} --authenticationDatabase admin --archive={{file}} --gzip', d: 'Existing documents with the same _id are kept; add --drop to replace collections.', danger: true },
+      { t: 'Edit MongoDB settings', cmd: 'sudo nano /etc/mongod.conf', d: 'Then: sudo systemctl restart mongod' },
+      {
+        t: 'Fix: MongoDB will not start on kernel 6.19+',
+        cmd: "sudo mkdir -p /etc/systemd/system/mongod.service.d && printf '[Service]\\nEnvironment=GLIBC_TUNABLES=glibc.pthread.rseq=1\\n' | sudo tee /etc/systemd/system/mongod.service.d/serverboy-rseq.conf && sudo systemctl daemon-reload && sudo systemctl restart mongod",
+        d: 'For the "Linux kernel versions 6.19 and newer" error. Serverboy\'s installer already does this.',
+      },
+    ],
+  },
+  {
+    id: 'mariadb',
+    title: 'MariaDB / MySQL',
+    icon: '⛁',
+    commands: [
+      { t: 'Open the database shell', cmd: 'sudo mysql', d: 'Inside: SHOW DATABASES; USE mydb; SHOW TABLES; SELECT * FROM users LIMIT 5; exit' },
+      { t: 'List databases', cmd: 'sudo mysql -e "SHOW DATABASES;"', d: '' },
+      {
+        t: 'Create a database and user',
+        cmd: "sudo mysql -e \"CREATE DATABASE {{database}}; CREATE USER '{{user}}'@'localhost' IDENTIFIED BY '{{password}}'; GRANT ALL ON {{database}}.* TO '{{user}}'@'localhost'; FLUSH PRIVILEGES;\"",
+        d: 'Avoid quotes in the password.',
+      },
+      { t: 'Back up a database', cmd: 'sudo mysqldump {{database}} | gzip > {{database}}-$(date +%F).sql.gz', d: '' },
+      { t: 'Restore a backup', cmd: 'gunzip < {{file}} | sudo mysql {{database}}', d: 'Overwrites tables that exist in the backup.', danger: true },
+      { t: 'Is MariaDB running?', cmd: 'systemctl status mariadb --no-pager', d: '' },
+    ],
+  },
+  {
+    id: 'node',
+    title: 'Node.js & PM2',
+    icon: '⬢',
+    commands: [
+      { t: 'Versions', cmd: 'node -v && npm -v && pm2 -v', d: '' },
+      { t: 'List running apps', cmd: 'pm2 list', d: 'status should be "online". A high ↺ (restarts) number means the app keeps crashing.' },
+      { t: "An app's logs", cmd: 'pm2 logs {{app}} --lines 100 --nostream', d: 'Errors from your code show up here.' },
+      { t: 'Follow logs live', cmd: 'pm2 logs {{app}}', d: 'Ctrl+C to stop.' },
+      { t: 'Restart an app', cmd: 'pm2 restart {{app}}', d: '' },
+      { t: 'Live app monitor', cmd: 'pm2 monit', d: 'CPU / memory per app. q to quit.' },
+      { t: 'Start an app with PM2', cmd: 'cd /var/www/{{app}} && pm2 start npm --name {{app}} -- start && pm2 save', d: 'Runs "npm start" and keeps it running. Serverboy\'s Node Apps page does this for you.' },
+      { t: 'Start apps on boot', cmd: 'pm2 save && pm2 startup', d: 'pm2 startup prints one more command: copy and run it.' },
+      { t: 'Install dependencies', cmd: 'cd {{folder|/var/www/app}} && npm ci', d: 'Uses package-lock.json. Use npm install if there is no lock file.' },
+    ],
+  },
+  {
+    id: 'git',
+    title: 'Git',
+    icon: '⑂',
+    commands: [
+      { t: 'Download a repository', cmd: 'git clone {{repo}} {{folder|/var/www/app}}', d: 'Private GitHub repo: use https://TOKEN@github.com/you/repo.git' },
+      { t: 'Get the latest code', cmd: 'cd {{folder|/var/www/app}} && git pull', d: '' },
+      { t: 'What changed locally?', cmd: 'git status', d: '' },
+      { t: 'Recent commits', cmd: 'git log --oneline -10', d: '' },
+      { t: 'Switch branch', cmd: 'git checkout {{branch|main}}', d: '' },
+      { t: 'Throw away local changes', cmd: 'git reset --hard && git clean -fd', d: 'Makes the folder match the last commit. Local edits are lost.', danger: true },
+    ],
+  },
+  {
+    id: 'docker',
+    title: 'Docker',
+    icon: '▦',
+    commands: [
+      { t: 'List containers', cmd: 'docker ps -a', d: '' },
+      { t: "A container's logs", cmd: 'docker logs --tail 100 {{container}}', d: '' },
+      { t: 'Restart a container', cmd: 'docker restart {{container}}', d: '' },
+      { t: 'Open a shell inside', cmd: 'docker exec -it {{container}} sh', d: 'exit to leave.' },
+      { t: 'Start a docker-compose project', cmd: 'cd {{folder}} && docker compose up -d', d: '' },
+      { t: 'Disk used by Docker', cmd: 'docker system df', d: '' },
+      { t: 'Remove unused images and containers', cmd: 'docker system prune -f', d: 'Frees disk space. Stopped containers are deleted.', danger: true },
+    ],
+  },
+  {
+    id: 'security',
+    title: 'Users & security',
+    icon: '⚿',
+    commands: [
+      { t: 'Change your password', cmd: 'passwd', d: 'Typing is invisible; that is normal.' },
+      { t: 'Add a Linux user', cmd: 'sudo adduser {{username}}', d: '' },
+      { t: 'Give a user admin rights', cmd: 'sudo usermod -aG sudo {{username}}', d: 'They can then do anything on the server.', danger: true },
+      { t: 'Add an SSH key', cmd: 'mkdir -p ~/.ssh && echo "{{public key}}" >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys', d: 'Paste the contents of id_ed25519.pub / id_rsa.pub.' },
+      { t: 'Failed SSH login attempts', cmd: 'sudo grep "Failed password" /var/log/auth.log | tail -20', d: 'Lots of these? Install Fail2ban from the App Store.' },
+      { t: 'Fail2ban: banned IPs', cmd: 'sudo fail2ban-client status sshd', d: '' },
+      { t: 'Fail2ban: unban an IP', cmd: 'sudo fail2ban-client set sshd unbanip {{ip}}', d: '' },
+    ],
+  },
+  {
+    id: 'cleanup',
+    title: 'Disk cleanup',
+    icon: '♻',
+    commands: [
+      { t: 'Size of system logs', cmd: 'journalctl --disk-usage', d: '' },
+      { t: 'Keep only 7 days of logs', cmd: 'sudo journalctl --vacuum-time=7d', d: '' },
+      { t: 'Files bigger than 200 MB', cmd: 'sudo find / -xdev -type f -size +200M -exec ls -lh {} \\; 2>/dev/null', d: '' },
+      { t: 'Clean package caches', cmd: 'sudo apt autoremove -y && sudo apt clean', d: '' },
+      {
+        t: 'Add 2 GB of swap',
+        cmd: 'sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab',
+        d: 'Extra emergency memory on disk. Helps small VMs (1-2 GB RAM) avoid crashes. Run once.',
+      },
+      { t: 'Scheduled jobs (cron)', cmd: 'crontab -l', d: 'Edit with crontab -e. Example nightly 2am line: 0 2 * * * /path/to/script.sh' },
+    ],
+  },
+  {
+    id: 'serverboy',
+    title: 'Serverboy itself',
+    icon: '▣',
+    commands: [
+      { t: 'Is Serverboy running?', cmd: 'systemctl status serverboy --no-pager', d: '' },
+      { t: "Serverboy's logs", cmd: 'sudo journalctl -u serverboy -n 100 --no-pager', d: '' },
+      { t: 'Restart Serverboy', cmd: 'sudo systemctl restart serverboy', d: 'This terminal disconnects for a few seconds; click Reconnect.' },
+      {
+        t: 'Update Serverboy',
+        cmd: 'curl -fsSL https://raw.githubusercontent.com/gaurav-swarnkar/serverboy/ccr-af56e66b-azkhkc/scripts/install-on-server.sh | sudo bash',
+        d: 'Your password and saved servers are kept. Reload the page afterwards.',
+      },
+      { t: 'Show the admin password', cmd: 'sudo grep ADMIN_PASSWORD /etc/serverboy.env', d: 'The initial password. If you changed it in My account, use that one.' },
+    ],
+  },
+];
+
+// "{{name|default}}" -> [{ name, value }] in order of first appearance.
+export function placeholders(cmd) {
+  const seen = new Map();
+  for (const m of cmd.matchAll(/\{\{([^}|]+)(?:\|([^}]*))?\}\}/g)) {
+    if (!seen.has(m[1])) seen.set(m[1], m[2] ?? '');
+  }
+  return [...seen].map(([name, value]) => ({ name, value }));
+}
+
+export function fill(cmd, values) {
+  return cmd.replace(/\{\{([^}|]+)(?:\|[^}]*)?\}\}/g, (_, name) => values[name] ?? '');
+}

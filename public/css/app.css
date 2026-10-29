@@ -252,3 +252,30 @@ pre.log {
 .boot { min-height: 100vh; display: grid; place-content: center; text-align: center; color: var(--muted); padding: 16px; }
 .boot-hint { opacity: 0; animation: boot-hint 0s 8s forwards; max-width: 360px; }
 @keyframes boot-hint { to { opacity: 1; } }
+
+/* ---------- terminal + command book ---------- */
+.term-layout { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.term-layout.with-book { grid-template-columns: minmax(0, 1fr) 380px; }
+.term-layout:not(.with-book) .cmdbook { display: none; }
+.cmdbook { display: flex; flex-direction: column; height: calc(100vh - 150px); min-height: 320px; }
+.cb-search { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.cb-list { overflow-y: auto; flex: 1; }
+.cb-foot { padding: 8px 12px; border-top: 1px solid var(--border); }
+.cb-section { border-bottom: 1px solid var(--border); }
+.cb-section > summary { cursor: pointer; padding: 9px 12px; font-weight: 600; display: flex; gap: 8px; align-items: center; list-style: none; }
+.cb-section > summary::-webkit-details-marker { display: none; }
+.cb-section > summary::after { content: '▸'; margin-left: auto; color: var(--muted); }
+.cb-section[open] > summary::after { content: '▾'; }
+.cb-section > summary:hover { background: var(--panel-2); }
+.cb-ico { width: 18px; text-align: center; }
+.cb-item { padding: 8px 12px 10px 38px; border-top: 1px dashed var(--border); }
+.cb-title { font-weight: 600; font-size: 13px; }
+.cb-cmd { display: block; margin: 5px 0; padding: 6px 8px; background: #0b0e19; color: #d6dbef; border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+.cb-cmd mark { background: #3b3f7a; color: #fff; border-radius: 3px; padding: 0 3px; }
+.cb-desc { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+.cb-actions { gap: 4px; }
+@media (max-width: 1100px) {
+  .term-layout.with-book { grid-template-columns: 1fr; }
+  .cmdbook { height: 60vh; }
+}
+.notice mark { background: var(--accent); color: #fff; border-radius: 3px; padding: 0 3px; }

@@ -7,7 +7,7 @@ Give it your server's IP, username and password (or SSH key), and you can:
 | Page | What it does |
 | --- | --- |
 | **Dashboard** | Live CPU, memory, disk, uptime and top processes. Update all packages, reboot. |
-| **Terminal** | A full SSH terminal in the browser. |
+| **Terminal** | A full SSH terminal in the browser, with a **command book**: about 140 everyday commands in 18 sections (services, logs, Nginx, SSL, MongoDB, MariaDB, PM2, Git, Docker, firewall, disk cleanup…), each explained in plain English. Search, fill in values, then Insert or Run. Risky ones ask first, and you can save your own. |
 | **File Manager** | Browse, upload (drag & drop), download (folders as `.tar.gz`), edit, rename, delete, chmod/chown, extract `.zip`/`.tar.gz`. Falls back to sudo for root-owned files. |
 | **App Store** | One-click installs: Nginx, MongoDB 8.0, MariaDB, Redis, Node.js 22, PM2, PHP-FPM, Docker, Certbot, UFW, Fail2ban, Git. Two "quick stacks" install everything for a Node+MongoDB SaaS or a PHP+MariaDB site. Also search and install any apt package. |
 | **Services** | Start / stop / restart / enable / disable systemd services and read their logs. |
