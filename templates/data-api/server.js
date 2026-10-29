@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { MongoClient, ObjectId, BSON } = require('mongodb');
 
-const ENGINE_VERSION = 1;
+const ENGINE_VERSION = 2;
 const CONFIG_FILE = path.join(__dirname, 'api.config.json');
 const OPERATIONS = {
   list: 'read',
@@ -102,6 +102,102 @@ function guard(op) {
     req.keyLabel = access?.label || 'public';
     next();
   };
+}
+
+// Custom endpoints: saved queries / forms defined per collection (config.collections[c].custom).
+const CUSTOM_OPS = { list: 'read', count: 'read', one: 'read', create: 'create' };
+
+function customGuard(method) {
+  return (req, res, next) => {
+    const c = collectionConfig(req.params.collection);
+    const ep = (c.custom || []).find((x) => x.id === req.params.name);
+    const kindMethod = ep && (ep.kind === 'create' ? 'POST' : 'GET');
+    if (!ep || kindMethod !== method || (ep.mode || 'off') === 'off') throw new ApiError(404, `No endpoint "${req.params.name}" for "${req.params.collection}"`);
+    const key = keyFromRequest(req);
+    const access = keyAccess(key, req.params.collection);
+    if (key && !access) throw new ApiError(401, 'Invalid API key');
+    if (ep.mode === 'key') {
+      if (!access) throw new ApiError(401, 'This endpoint needs an API key (x-api-key header)');
+      if (!access.ops.has(CUSTOM_OPS[ep.kind])) throw new ApiError(403, `This API key may not ${CUSTOM_OPS[ep.kind]} "${req.params.collection}"`);
+    }
+    req.col = c;
+    req.ep = ep;
+    req.keyLabel = access?.label || 'public';
+    next();
+  };
+}
+
+function typedParam(p, raw) {
+  const v = String(raw);
+  switch (p.type) {
+    case 'number': {
+      const n = Number(v);
+      if (v.trim() === '' || !Number.isFinite(n)) throw new ApiError(400, `"${p.name}" must be a number`);
+      return n;
+    }
+    case 'boolean':
+      if (!['true', 'false', '1', '0'].includes(v)) throw new ApiError(400, `"${p.name}" must be true or false`);
+      return v === 'true' || v === '1';
+    case 'date': {
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) throw new ApiError(400, `"${p.name}" must be a date like 2025-01-31`);
+      return d;
+    }
+    case 'objectId':
+      if (!/^[0-9a-f]{24}$/i.test(v)) throw new ApiError(400, `"${p.name}" must be a 24-character id`);
+      return new ObjectId(v);
+    default:
+      if (v.length > 1000) throw new ApiError(400, `"${p.name}" is too long`);
+      return v;
+  }
+}
+
+// The endpoint's filter with each "{{param}}" value replaced by the caller's (typed) value.
+// A placeholder only ever becomes a value, never an operator or a field name. A missing
+// optional parameter without a default removes the condition it is in.
+function customFilter(ep, query) {
+  const values = {};
+  for (const p of ep.params || []) {
+    const raw = query[p.name] ?? (p.default !== undefined && p.default !== '' ? p.default : undefined);
+    if (raw === undefined || Array.isArray(raw) || typeof raw === 'object') {
+      if (p.required) throw new ApiError(400, `Missing parameter "${p.name}"`);
+      continue;
+    }
+    values[p.name] = typedParam(p, raw);
+  }
+  const plain = (v) => v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof ObjectId) && !(v instanceof Date);
+  const empty = (v) => v === undefined || (plain(v) && !Object.keys(v).length) || (Array.isArray(v) && !v.length);
+  const fill = (v) => {
+    if (typeof v === 'string') {
+      const m = v.match(/^\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}$/);
+      if (!m) return v;
+      return m[1] in values ? values[m[1]] : undefined;
+    }
+    if (Array.isArray(v)) {
+      // {"$in": ["{{a}}", "{{b}}"]} keeps the values given; {"$and": [{...}]} drops emptied conditions
+      return v.map(fill).filter((x) => !empty(x));
+    }
+    if (plain(v)) {
+      const out = {};
+      for (const [k, x] of Object.entries(v)) {
+        const f = fill(x);
+        // Drop a condition that lost all of its values (e.g. {"price": {"$gte": "{{min}}"}} without min).
+        if (empty(f) && !empty(x)) continue;
+        out[k] = f;
+      }
+      return out;
+    }
+    return v;
+  };
+  const template = BSON.EJSON.deserialize(ep.filter || {}, { relaxed: true });
+  return fill(template);
+}
+
+function customProjection(req) {
+  const hidden = req.col.hidden || [];
+  const fields = String(req.ep.fields || '').split(',').map((f) => f.trim()).filter(Boolean).filter((f) => !startsWithField(f, hidden));
+  if (fields.length) return Object.fromEntries(fields.map((f) => [f, 1]));
+  return hidden.length ? Object.fromEntries(hidden.map((f) => [f, 0])) : undefined;
 }
 
 function idFilter(id) {
@@ -254,6 +350,41 @@ app.get('/api/:collection', guard('list'), async (req, res) => {
     coll.countDocuments(filter),
   ]);
   res.json({ data, total, limit, skip });
+});
+
+app.get('/api/:collection/views/:name', customGuard('GET'), async (req, res) => {
+  const ep = req.ep;
+  const filter = customFilter(ep, req.query);
+  checkFilter(filter, req.col.hidden || []);
+  const coll = db().collection(req.params.collection);
+  if (ep.kind === 'count') return res.json({ count: await coll.countDocuments(filter) });
+  const sort = sortSpec(ep.sort);
+  if (ep.kind === 'one') {
+    const doc = await coll.find(filter, { projection: customProjection(req) }).sort(sort).limit(1).next();
+    if (!doc) throw new ApiError(404, 'Not found');
+    return res.json(doc);
+  }
+  const max = Math.min(Number(ep.limit) || Number(config.maxLimit) || 100, Number(config.maxLimit) || 100);
+  const limit = Math.min(Math.max(Number(req.query.limit) || max, 1), max);
+  const skip = Math.max(Number(req.query.skip) || 0, 0) || (Math.max(Number(req.query.page) || 1, 1) - 1) * limit;
+  const [data, total] = await Promise.all([
+    coll.find(filter, { projection: customProjection(req) }).sort(sort).skip(skip).limit(limit).toArray(),
+    coll.countDocuments(filter),
+  ]);
+  res.json({ data, total, limit, skip });
+});
+
+app.post('/api/:collection/views/:name', customGuard('POST'), async (req, res) => {
+  const ep = req.ep;
+  const allowed = String(ep.fields || '').split(',').map((f) => f.trim()).filter(Boolean);
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : null;
+  if (!body) throw new ApiError(400, 'Send a JSON object in the request body');
+  const input = allowed.length ? Object.fromEntries(Object.entries(body).filter(([k]) => allowed.includes(k))) : body;
+  const fixed = BSON.EJSON.deserialize(ep.set || {}, { relaxed: true });
+  const doc = writable({ ...input, ...fixed }, { ...req.col, required: [...new Set([...(req.col.required || []), ...(ep.required || [])])] }, { creating: true });
+  Object.assign(doc, fixed); // fixed values win, even on read-only fields
+  const r = await db().collection(req.params.collection).insertOne(doc);
+  res.status(201).json(stripHidden({ _id: r.insertedId, ...doc }, req.col.hidden));
 });
 
 app.get('/api/:collection/count', guard('count'), async (req, res) => {

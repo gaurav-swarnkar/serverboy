@@ -53,11 +53,13 @@ export async function mountApiSummary(el, server, dbName, col, canEdit = true) {
         c
           ? `<table class="small" style="margin-bottom:12px"><tbody>${ENDPOINTS.filter(([id]) => c.endpoints[id] !== 'off')
               .map(([id, m, s]) => `<tr><td style="width:80px"><span class="badge method-${m.toLowerCase()}">${m}</span></td><td class="mono">/api/${esc(col)}${s}</td><td>${c.endpoints[id] === 'key' ? '🔑 key' : '🌐 public'}</td></tr>`)
-              .join('') || '<tr><td class="muted">All endpoints are off.</td></tr>'}</tbody></table>`
+              .join('')}${(c.custom || []).filter((x) => x.mode !== 'off')
+              .map((x) => `<tr><td><span class="badge method-${x.kind === 'create' ? 'post' : 'get'}">${x.kind === 'create' ? 'POST' : 'GET'}</span></td><td class="mono">/api/${esc(col)}/views/${esc(x.id)}</td><td>${x.mode === 'key' ? '🔑 key' : '🌐 public'}</td></tr>`)
+              .join('')}</tbody></table>`
           : `<p class="small muted"><span class="mono">${esc(col)}</span> is not available through the API.</p>`
       }
       <div class="row">${open(c ? 'Open API page' : canEdit ? `Expose ${esc(col)} on the API page` : 'Open API page')}</div>
-      <p class="small muted" style="margin-bottom:0">Endpoints, field rules, Try it, docs, keys and settings are on the API page (also in the menu: Hosting → APIs).</p>
+      <p class="small muted" style="margin-bottom:0">Endpoints, custom endpoints, Try it, the API portal (with .txt docs download), keys and settings are on the API page (also in the menu: Hosting → APIs).</p>
     </div>`;
   } catch (err) {
     el.innerHTML = errorHtml(err);

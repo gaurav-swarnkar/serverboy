@@ -27,6 +27,13 @@ const FIELD_RE = /^[A-Za-z0-9_.-]{1,100}$/;
 const ENDPOINTS = ['list', 'count', 'get', 'create', 'update', 'replace', 'delete'];
 const MODES = ['off', 'public', 'key'];
 const OPS = ['read', 'create', 'update', 'delete'];
+const ENGINE_VERSION = Number((fs.readFileSync(path.join(TEMPLATE_DIR, 'server.js'), 'utf8').match(/ENGINE_VERSION = (\d+)/) || [])[1]) || 1;
+const CUSTOM_KINDS = ['list', 'count', 'one', 'create'];
+const PARAM_TYPES = ['string', 'number', 'boolean', 'date', 'objectId'];
+const CUSTOM_ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
+const PARAM_RE = /^[A-Za-z_][A-Za-z0-9_]{0,40}$/;
+const RESERVED_PARAMS = ['limit', 'skip', 'page', 'sort', 'fields', 'filter'];
+const FORBIDDEN_OPERATORS = ['$where', '$function', '$accumulator'];
 
 const dir = (name) => `/var/www/${name}`;
 const configPath = (name) => `${dir(name)}/api.config.json`;
@@ -122,8 +129,17 @@ router.get('/mongo/apis/:name', async (req, res) => {
   const name = apiName(req.params.name);
   const cfg = await loadConfig(req.params.id, name);
   const app = JSON.parse((await readRemote(req.params.id, `${dir(name)}/.serverboy-app.json`)) || '{}');
-  const r = await ssh.exec(req.params.id, `pm2 jlist 2>/dev/null | tail -1; echo; grep -l 'ssl_certificate' /etc/nginx/sites-enabled/${q(app.domain || 'none')} 2>/dev/null`);
-  const [jlist, ...rest] = r.stdout.split('\n');
+  const r = await ssh.exec(
+    req.params.id,
+    `pm2 jlist 2>/dev/null | tail -1; echo; ${app.port ? `curl -s -m 3 http://127.0.0.1:${Number(app.port)}/health; ` : ''}echo; grep -l 'ssl_certificate' /etc/nginx/sites-enabled/${q(app.domain || 'none')} 2>/dev/null`,
+  );
+  const [jlist, healthLine, ...rest] = r.stdout.split('\n');
+  let engine = null;
+  try {
+    engine = JSON.parse(healthLine).engine || null;
+  } catch {
+    /* not answering */
+  }
   let status = 'not running';
   try {
     status = JSON.parse(jlist || '[]').find((p) => p.name === name)?.pm2_env?.status || 'not running';
@@ -137,6 +153,8 @@ router.get('/mongo/apis/:name', async (req, res) => {
     domain: app.domain || null,
     url: app.domain ? `${https ? 'https' : 'http'}://${app.domain}` : null,
     status,
+    engine,
+    latestEngine: ENGINE_VERSION,
   });
 });
 
@@ -272,9 +290,111 @@ router.put('/mongo/apis/:name/collections/:col', async (req, res) => {
     readonly: cleanFields(req.body?.readonly),
     required: cleanFields(req.body?.required),
     timestamps: Boolean(req.body?.timestamps),
+    custom: cfg.collections[col]?.custom || [],
   };
   await saveConfig(req.params.id, name, cfg);
   audit(req, `Data API ${name}: saved ${col} (${ENDPOINTS.filter((e) => endpoints[e] !== 'off').map((e) => `${e}=${endpoints[e]}`).join(', ') || 'all off'})`);
+  res.json(publicConfig(cfg));
+});
+
+// ---------- custom endpoints (saved queries and forms) ----------
+
+function jsonObject(value, label) {
+  let v = value;
+  if (typeof v === 'string') {
+    if (!v.trim()) return {};
+    try {
+      v = JSON.parse(v);
+    } catch {
+      throw new HttpError(400, `${label} must be valid JSON`);
+    }
+  }
+  if (v == null) return {};
+  if (typeof v !== 'object' || Array.isArray(v)) throw new HttpError(400, `${label} must be a JSON object like { "status": "published" }`);
+  const walk = (x, depth) => {
+    if (depth > 20) throw new HttpError(400, `${label} is nested too deeply`);
+    if (Array.isArray(x)) return x.forEach((y) => walk(y, depth + 1));
+    if (x && typeof x === 'object') {
+      for (const [k, y] of Object.entries(x)) {
+        if (FORBIDDEN_OPERATORS.includes(k)) throw new HttpError(400, `The ${k} operator is not allowed`);
+        walk(y, depth + 1);
+      }
+    }
+  };
+  walk(v, 0);
+  if (JSON.stringify(v).length > 20000) throw new HttpError(400, `${label} is too large`);
+  return v;
+}
+
+function cleanCustom(body, col) {
+  const id = String(body?.id || '').trim().toLowerCase();
+  if (!CUSTOM_ID_RE.test(id)) throw new HttpError(400, 'Path name: lowercase letters, numbers, - and _ (e.g. published)');
+  const kind = CUSTOM_KINDS.includes(body?.kind) ? body.kind : 'list';
+  const mode = MODES.includes(body?.mode) ? body.mode : 'off';
+  const params = (Array.isArray(body?.params) ? body.params : []).map((p) => {
+    const name = String(p?.name || '').trim();
+    if (!PARAM_RE.test(name)) throw new HttpError(400, `Invalid parameter name "${name}"`);
+    if (RESERVED_PARAMS.includes(name)) throw new HttpError(400, `"${name}" is reserved for paging; pick another parameter name`);
+    return {
+      name,
+      type: PARAM_TYPES.includes(p.type) ? p.type : 'string',
+      required: Boolean(p.required),
+      default: p.default === undefined || p.default === null ? '' : String(p.default).slice(0, 200),
+      description: String(p.description || '').slice(0, 300),
+    };
+  });
+  if (new Set(params.map((p) => p.name)).size !== params.length) throw new HttpError(400, 'Two parameters have the same name');
+  const filter = kind === 'create' ? {} : jsonObject(body?.filter, 'Filter');
+  const used = [...JSON.stringify(filter).matchAll(/"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}"/g)].map((m) => m[1]);
+  const missing = used.filter((u) => !params.some((p) => p.name === u));
+  if (missing.length) throw new HttpError(400, `The filter uses {{${missing[0]}}}; add it as a parameter`);
+  const set = kind === 'create' ? jsonObject(body?.set, 'Fixed values') : {};
+  if (Object.keys(set).some((k) => k === '_id' || k.startsWith('$'))) throw new HttpError(400, 'Fixed values cannot set _id or use $ operators');
+  const sort = String(body?.sort || '').trim();
+  if (sort && !sort.split(',').every((f) => FIELD_RE.test(f.trim().replace(/^-/, '')))) throw new HttpError(400, 'Sort: field names separated by commas, - for descending (e.g. -createdAt)');
+  return {
+    id,
+    title: String(body?.title || id).trim().slice(0, 80),
+    group: String(body?.group || '').trim().slice(0, 40),
+    description: String(body?.description || '').trim().slice(0, 1000),
+    kind,
+    mode,
+    filter,
+    sort: kind === 'create' || kind === 'count' ? '' : sort,
+    fields: cleanFields(body?.fields).join(','),
+    limit: kind === 'list' ? Math.max(1, Math.min(Number(body?.limit) || 20, 1000)) : undefined,
+    params: kind === 'create' ? [] : params,
+    set,
+    required: kind === 'create' ? cleanFields(body?.required) : [],
+    collection: col,
+  };
+}
+
+router.put('/mongo/apis/:name/collections/:col/custom/:cid', async (req, res) => {
+  const name = apiName(req.params.name);
+  const col = String(req.params.col);
+  const cfg = await loadConfig(req.params.id, name);
+  const c = cfg.collections?.[col];
+  if (!c) throw new HttpError(404, `Expose ${col} first`);
+  const ep = cleanCustom(req.body, col);
+  delete ep.collection;
+  const list = (c.custom || []).filter((x) => x.id !== req.params.cid);
+  if (list.some((x) => x.id === ep.id)) throw new HttpError(409, `${col} already has an endpoint named "${ep.id}"`);
+  const at = (c.custom || []).findIndex((x) => x.id === req.params.cid);
+  list.splice(at < 0 ? list.length : at, 0, ep);
+  c.custom = list;
+  await saveConfig(req.params.id, name, cfg);
+  audit(req, `Data API ${name}: saved custom endpoint ${col}/views/${ep.id} (${ep.kind}, ${ep.mode})`);
+  res.json(publicConfig(cfg));
+});
+
+router.delete('/mongo/apis/:name/collections/:col/custom/:cid', async (req, res) => {
+  const name = apiName(req.params.name);
+  const cfg = await loadConfig(req.params.id, name);
+  const c = cfg.collections?.[req.params.col];
+  if (c) c.custom = (c.custom || []).filter((x) => x.id !== req.params.cid);
+  await saveConfig(req.params.id, name, cfg);
+  audit(req, `Data API ${name}: deleted custom endpoint ${req.params.col}/views/${req.params.cid}`);
   res.json(publicConfig(cfg));
 });
 

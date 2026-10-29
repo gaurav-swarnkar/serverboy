@@ -95,7 +95,7 @@ Each app lives in `/var/www/<name>`, owned by your SSH user, with its settings i
 
 ## Data APIs (MongoDB collections over HTTPS)
 
-Hosting → **APIs** (or Databases → MongoDB → a collection → **API ↗**, which opens it in a new browser tab). Each API has its own page: a collections list with **Endpoints & rules**, **Try it** (with request history and copy-as-curl) and **Docs** per collection, plus **API keys** and **Settings** (CORS, rate limit, address, engine update, delete).
+Hosting → **APIs** (or Databases → MongoDB → a collection → **API ↗**, which opens it in a new browser tab). Each API has its own page: the **API portal**, a collections list with **Endpoints & rules**, **Custom endpoints**, **Try it** (with request history and copy-as-curl) and **Docs** per collection, plus **API keys** and **Settings** (CORS, rate limit, address, engine update, delete).
 
 1. **Create the API service** (once per database). Serverboy installs a small Node.js service in `/var/www/<name>` (run by PM2, visible under Node Apps), gives it its own MongoDB user that can only access that database, and optionally publishes it on a domain with HTTPS.
 2. **Open the collection** with a preset, then set each endpoint to *Off*, *Public* or *API key needed*:
@@ -113,6 +113,11 @@ Hosting → **APIs** (or Databases → MongoDB → a collection → **API ↗**,
 3. **Field rules:** *hidden* fields are never returned and cannot be filtered on; *read-only* fields cannot be written; *required* fields must be present on create; optional automatic `createdAt` / `updatedAt`.
 4. **API keys** (sent as `x-api-key`) can be read-only or read/write, for all collections or chosen ones. Keys are stored only as hashes and shown once.
 5. **Settings:** allowed websites (CORS), rate limit per minute, maximum page size.
+6. **Custom endpoints** add as many extra APIs per collection as you need, each with its own access and a **group** (e.g. Website, Mobile app, Admin):
+   - *List / Count / Get the first match*: `GET /api/<collection>/views/<name>?param=…` with a fixed filter, sort, fields and page size. Put `"{{param}}"` in the filter where a caller's value goes, e.g. `{ "status": "published", "author": "{{author}}" }`; parameters are typed (string, number, boolean, date, objectId) and only ever become values, never operators. A missing optional parameter removes its condition.
+   - *Create (form)*: `POST /api/<collection>/views/<name>` accepts only the fields you list, checks required fields and always saves fixed values (e.g. `{ "status": "new" }`).
+   Existing APIs need **Update engine** (engine v2) once before custom endpoints answer.
+7. **API portal:** every endpoint of the API in one searchable catalog, grouped by collection and group, with a reference page for each (parameters, body fields, data model inferred from your documents, responses, curl and JavaScript examples). Tick any endpoints and **Download .txt** (or Copy / Preview): a plain-text reference made to paste into an AI assistant, a README or a ticket. Each endpoint and each collection's Docs tab can be downloaded on its own too.
 
 Changes apply within about 2 seconds without a restart. JavaScript query operators (`$where`, `$function`) are blocked. The **Try it** box sends real requests from the server, and **How to call it** shows URLs plus `fetch` and `curl` examples for your configuration.
 
