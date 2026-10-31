@@ -1,7 +1,8 @@
 // "APIs" and "Connect" tabs of a MongoDB collection: the APIs that use it (managed under
 // Hosting → APIs) and how to use the database from code and web pages.
 import { api, esc, loadingHtml, errorHtml } from '../ui.js';
-import { summary } from './api-docs.js';
+import { summary, inferFields } from './api-docs.js';
+import { endpointTable } from './api-endpoints.js';
 
 // The API servers (and their APIs) of a server, loaded once per Databases page.
 export function loadApiServices(server) {
@@ -31,17 +32,38 @@ export async function mountCollectionApis(el, server, db, col, canEdit, services
           list.length
             ? list
                 .map(
-                  (a) => `<div class="api-row">
+                  (a, i) => `<div class="api-row">
                   <div class="grow"><a href="${page(a.svc.name, a.slug)}"><b>${esc(a.title)}</b></a> <span class="mono small muted">${esc(a.svc.domain ? `https://${a.svc.domain}` : '')}/api/${esc(a.slug)}</span>
                     <div class="small muted">${esc(summary(a))}</div></div>
-                  <div class="row" style="gap:6px"><a class="btn btn-sm" href="${page(a.svc.name, a.slug, 'play')}">▶ Try</a><a class="btn btn-sm" href="${docs(a.svc.name, a.slug)}">📖 Docs</a>${canEdit ? `<a class="btn btn-sm" href="${page(a.svc.name, a.slug, 'setup')}">⚙ Settings</a>` : ''}</div>
-                </div>`,
+                  <div class="row" style="gap:6px"><button class="btn-sm btn-primary" data-endpoints="${i}">Endpoints ▾</button><a class="btn btn-sm" href="${docs(a.svc.name, a.slug)}">📖 Swagger</a>${canEdit ? `<a class="btn btn-sm" href="${page(a.svc.name, a.slug, 'setup')}">⚙</a>` : ''}</div>
+                </div><div class="api-row-endpoints hidden" data-endpoints-box="${i}"></div>`,
                 )
                 .join('')
             : `<div class="empty">No API uses ${esc(col)} yet.${canEdit ? ` <a href="${newUrl}">Make one</a> to let websites and apps use this data.` : ''}</div>`
         }
       </div>
-      <p class="small muted">A collection can have several APIs with different rules, e.g. one that anyone can read and one for your admin app with a key. All APIs and their Swagger docs: <a href="#/s/${server.id}/apis">Hosting → APIs</a>.</p>`;
+      <p class="small muted">All APIs: <a href="#/s/${server.id}/apis">Hosting → APIs</a>.</p>`;
+    // Endpoints with Test buttons, loaded when opened.
+    const infos = {};
+    el.onclick = async (e) => {
+      const b = e.target.closest('[data-endpoints]');
+      if (!b) return;
+      const i = Number(b.dataset.endpoints);
+      const box = el.querySelector(`[data-endpoints-box="${i}"]`);
+      box.classList.toggle('hidden');
+      if (box.classList.contains('hidden') || box.dataset.loaded) return;
+      box.innerHTML = loadingHtml();
+      const a = list[i];
+      try {
+        infos[a.svc.name] ||= api(`/servers/${server.id}/mongo/apis/${a.svc.name}`);
+        const [info, sample] = await Promise.all([infos[a.svc.name], api(`/servers/${server.id}/mongo/find`, { method: 'POST', body: { db, collection: col, limit: 20 } }).catch(() => ({ docs: [] }))]);
+        const id = sample.docs?.[0]?._id;
+        endpointTable(box, { serverId: server.id, svc: a.svc.name, info, slug: a.slug, fields: inferFields(sample.docs, info.apis[a.slug]), sampleId: id?.$oid || id || '', canKey: canEdit });
+        box.dataset.loaded = '1';
+      } catch (err) {
+        box.innerHTML = errorHtml(err);
+      }
+    };
   } catch (err) {
     el.innerHTML = errorHtml(err);
   }

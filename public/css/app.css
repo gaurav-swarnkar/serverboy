@@ -380,3 +380,20 @@ tr.st-unused { background: var(--warn-soft); }
 .swagger-wrap { background: #fff; color: #222; border-radius: 10px; border: 1px solid var(--border); padding: 4px 8px 16px; min-height: 200px; }
 .swagger-wrap .swagger-ui .info { margin: 20px 0; }
 .swagger-wrap .swagger-ui .scheme-container { box-shadow: none; padding: 12px 0; }
+
+/* ---------- endpoint table with Test ---------- */
+.ep-table td { vertical-align: middle; }
+.ep-panel > td { background: var(--panel-2); padding: 10px 14px; }
+.ep-test .row { gap: 10px; margin-bottom: 8px; }
+.ep-test input, .ep-test select { padding: 4px 8px; }
+.ep-test textarea { width: 100%; margin-bottom: 8px; }
+.ep-result { border-left: 4px solid var(--accent); padding: 6px 10px; border-radius: 6px; background: var(--panel); }
+.ep-result.ok { border-left-color: var(--ok, #16a34a); }
+.ep-result.warn { border-left-color: var(--warn); }
+.ep-result.bad { border-left-color: var(--bad); }
+.api-row-endpoints { margin: 0 0 8px 14px; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 8px 8px; background: var(--panel); }
+.card > .api-row-endpoints { margin: -4px 16px 8px; }
+.ep-test label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 400; }
+.ep-test label input, .ep-test label select { width: auto; margin: 0; }
+.ep-test label.grow input { flex: 1; }
+.ep-test textarea { min-height: 0; height: auto; }

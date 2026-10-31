@@ -2,13 +2,14 @@
 //   #/s/<id>/apis                         all APIs, by database and collection
 //   #/s/<id>/apis/docs/<server>/<slug|all> Swagger docs
 //   #/s/<id>/apis/new[/<db>/<collection>] make a new API
-//   #/s/<id>/apis/a/<server>/<slug>/<tab> one API: play | setup | code | keys
+//   #/s/<id>/apis/a/<server>/<slug>/<tab> one API: endpoints | play | setup | keys
 //   #/s/<id>/apis/s/<server>/<tab>        one API server: apis | keys | settings
 // An "API server" is the small service (one per database) that answers the requests; most
 // people never need to look at it.
 import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, onAction, loadingHtml, errorHtml, hasAll, can } from '../ui.js';
 import { mountSwagger } from './swagger.js';
-import { OPS, WHO, summary, baseUrl, catalog, inferFields, endpointHtml, modelHtml, docsText, downloadText, details, fetchFor, curlFor } from './api-docs.js';
+import { endpointTable } from './api-endpoints.js';
+import { OPS, WHO, summary, baseUrl, catalog, inferFields, docsText, downloadText } from './api-docs.js';
 
 const SYSTEM_DBS = new Set(['admin', 'local', 'config', 'serverboy']);
 
@@ -50,7 +51,7 @@ export async function render(el, { server, rest }) {
   const parts = rest.map((x) => decodeURIComponent(x));
   const ctx = makeCtx(server);
   if (parts[0] === 'new') return renderNew(el, ctx, { db: parts[1], collection: parts[2] === '-' ? '' : parts[2], service: parts[3] });
-  if (parts[0] === 'a' && parts[1] && parts[2]) return renderApi(el, ctx, parts[1], parts[2], parts[3] || 'play');
+  if (parts[0] === 'a' && parts[1] && parts[2]) return renderApi(el, ctx, parts[1], parts[2], !parts[3] || parts[3] === 'code' ? 'endpoints' : parts[3]);
   if (parts[0] === 's' && parts[1]) return renderService(el, ctx, parts[1], parts[2] || 'apis');
   if (parts[0] === 'docs') return renderDocs(el, ctx, parts[1], parts[2] || 'all');
   return renderHome(el, ctx);
@@ -63,7 +64,7 @@ function makeCtx(server) {
     server,
     base,
     home: `#/s/${server.id}/apis`,
-    apiUrl: (svc, slug, tab = 'play') => `#/s/${server.id}/apis/a/${encodeURIComponent(svc)}/${encodeURIComponent(slug)}/${tab}`,
+    apiUrl: (svc, slug, tab = 'endpoints') => `#/s/${server.id}/apis/a/${encodeURIComponent(svc)}/${encodeURIComponent(slug)}/${tab}`,
     docsUrl: (svc, slug = 'all') => `#/s/${server.id}/apis/docs/${encodeURIComponent(svc)}/${encodeURIComponent(slug)}`,
     newUrl: (db, col) => `#/s/${server.id}/apis/new/${encodeURIComponent(db)}/${encodeURIComponent(col || '-')}`,
     svcUrl: (svc, tab = 'apis') => `#/s/${server.id}/apis/s/${encodeURIComponent(svc)}/${tab}`,
@@ -144,7 +145,7 @@ async function renderHome(el, ctx) {
   const apiRow = (a, svc) => `<div class="api-row">
       <div class="grow"><a href="${ctx.apiUrl(svc.name, a.slug)}"><b>${esc(a.title)}</b></a> <span class="mono small muted">/api/${esc(a.slug)}</span>${a.group ? ` <span class="badge">${esc(a.group)}</span>` : ''}
         <div class="small muted">${esc(summary(a))}</div></div>
-      <div class="row" style="gap:6px"><a class="btn btn-sm" href="${ctx.apiUrl(svc.name, a.slug, 'play')}">▶ Try</a><a class="btn btn-sm" href="${ctx.docsUrl(svc.name, a.slug)}">📖 Docs</a><a class="btn btn-sm" href="${ctx.apiUrl(svc.name, a.slug, 'setup')}">⚙</a></div>
+      <div class="row" style="gap:6px"><a class="btn btn-sm btn-primary" href="${ctx.apiUrl(svc.name, a.slug)}">Test</a><a class="btn btn-sm" href="${ctx.docsUrl(svc.name, a.slug)}">📖 Swagger</a><a class="btn btn-sm" href="${ctx.apiUrl(svc.name, a.slug, 'setup')}">⚙</a></div>
     </div>`;
   body.innerHTML = `
     ${services.filter((s) => s.needsUpgrade).map(upgradeNotice).join('')}
@@ -469,10 +470,10 @@ async function renderNew(el, ctx, pre) {
 // ======================= one API =======================
 
 const TABS = [
-  ['play', '▶ Playground'],
-  ['setup', '⚙ What it can do'],
-  ['code', '&lt;/&gt; Code & docs'],
-  ['keys', '🔑 Keys'],
+  ['endpoints', 'Endpoints'],
+  ['play', 'Items'],
+  ['setup', 'Settings'],
+  ['keys', 'Keys'],
 ];
 
 async function renderApi(el, ctx, svcName, slug, tab) {
@@ -498,16 +499,12 @@ async function renderApi(el, ctx, svcName, slug, tab) {
     <div class="small" style="margin-bottom:6px"><a href="${ctx.home}">← All APIs</a></div>
     <div class="page-head">
       <div>
-        <h1>${esc(a.title)}</h1>
-        <div class="sub"><span class="mono">${esc(url)}</span> <button class="btn-sm btn-ghost" data-action="copyUrl" title="Copy the address">⧉ Copy</button> <a class="btn btn-sm" href="${ctx.docsUrl(svcName, slug)}">📖 Swagger docs</a></div>
-        <div class="sub small">Data: ${esc(info.database)} → ${esc(a.collection)}${a.group ? ` · Folder: ${esc(a.group)}` : ''} · <a href="${ctx.svcUrl(svcName, 'settings')}">API server ${esc(svcName)}</a></div>
+        <h1>${esc(a.title)} ${info.status === 'online' ? '' : `<span class="badge bad" style="vertical-align:middle">${esc(info.status)}</span>`}${info.url ? '' : ' <span class="badge" style="vertical-align:middle" title="Only this server can reach it. Publish it in the API server settings.">private</span>'}${canEdit || info.needsUpgrade ? '' : ' <span class="badge" style="vertical-align:middle">view only</span>'}</h1>
+        <div class="sub"><span class="mono">${esc(url)}</span> <button class="btn-sm btn-ghost" data-action="copyUrl" title="Copy the address">⧉</button> · <a href="#/s/${ctx.server.id}/databases/mongo">${esc(info.database)} → ${esc(a.collection)}</a></div>
       </div>
+      <div class="row"><a class="btn btn-sm" href="${ctx.docsUrl(svcName, slug)}">📖 Swagger</a><button class="btn-sm" data-action="downloadDocs">⬇ .txt</button><a class="btn btn-sm" href="${ctx.svcUrl(svcName, 'settings')}" title="API server ${esc(svcName)}">⚙ Server</a></div>
     </div>
     ${info.needsUpgrade ? upgradeNotice(info) : ''}
-    ${info.status === 'online' ? '' : `<div class="notice warn" style="margin-bottom:12px">The API server is <b>${esc(info.status)}</b>, so the API does not answer right now. <a href="${ctx.svcUrl(svcName, 'settings')}">Open its settings</a> to start or fix it.</div>`}
-    ${info.url ? '' : `<div class="notice" style="margin-bottom:12px">Not on the internet yet: only this server can reach it. <a href="${ctx.svcUrl(svcName, 'settings')}">Publish it on an address</a> so websites and apps can use it. The playground works already.</div>`}
-    <div class="api-summary">${esc(summary(a))}</div>
-    ${canEdit || info.needsUpgrade ? '' : '<div class="notice" style="margin-bottom:12px">You can look and test, but not change this API (view access).</div>'}
     <div class="tabs">${TABS.map(([id, label]) => `<button class="${tab === id ? 'active' : ''}" data-action="tab" data-tab="${id}">${label}</button>`).join('')}</div>
     <div id="api-body"></div>`;
 
@@ -517,12 +514,24 @@ async function renderApi(el, ctx, svcName, slug, tab) {
     el.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === t));
     window.history.replaceState(null, '', ctx.apiUrl(svcName, slug, t));
     if (t === 'setup') drawSetup();
-    else if (t === 'code') drawCode();
     else if (t === 'keys') drawKeys();
-    else drawPlay();
+    else if (t === 'play') drawPlay();
+    else drawEndpoints();
   };
 
-  // ---------- playground ----------
+  // ---------- endpoints ----------
+
+  function drawEndpoints() {
+    bodyEl.innerHTML = '<div class="card flush" id="ep-box"></div>';
+    ctx.samples(info.database, a.collection).then((docs) => {
+      const box = bodyEl.querySelector('#ep-box');
+      if (!box) return;
+      const first = docs[0]?._id;
+      endpointTable(box, { serverId: ctx.server.id, svc: svcName, info, slug, fields: page.fields, sampleId: first?.$oid || first || '', canKey: canEdit });
+    });
+  }
+
+  // ---------- items (playground) ----------
 
   const why = (op) => (a.ops[op] === 'off' ? 'Switched off for everyone (see "What it can do")' : '');
   const idOf = (it) => encodeURIComponent(it._id?.$oid || it._id);
@@ -538,10 +547,9 @@ async function renderApi(el, ctx, svcName, slug, tab) {
           <button data-action="reload" title="Load again">↻</button>
           <button class="btn-primary" data-action="add" ${a.ops.create === 'off' ? `disabled title="${esc(why('create'))}"` : ''}>+ Add item</button>
         </div>
-        <p class="small muted" style="margin:6px 0 0">${page.role === 'public' ? 'You see exactly what any visitor of a website would get.' : "Requests carry Serverboy's test key, like an app with a key that may do everything this API allows."} Everything here is real: changes are saved in ${esc(info.database)} → ${esc(a.collection)}.</p>
       </div>
       <div class="card flush" id="pg-list">${loadingHtml()}</div>
-      <div class="card" id="pg-result"><p class="muted small" style="margin:0">What you do appears here, in plain words, with the request behind it.</p></div>
+      <div class="card" id="pg-result"><p class="muted small" style="margin:0">Results appear here.</p></div>
       <details class="card"><summary><b>Advanced:</b> send any request</summary>
         <div class="form-grid" style="margin-top:10px">
           <label class="field"><span>Method</span><select id="pg-m">${['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].map((m) => `<option>${m}</option>`).join('')}</select></label>
@@ -1027,70 +1035,6 @@ async function renderApi(el, ctx, svcName, slug, tab) {
     };
   }
 
-  // ---------- code & docs ----------
-
-  function drawCode() {
-    const entries = catalog(info, [slug]);
-    const plainSteps = {
-      list: 'Get the items, e.g. to show them on a page.',
-      get: 'Get one item by its id, e.g. for a detail page.',
-      count: 'Get how many items there are.',
-      create: 'Add a new item, e.g. from a form.',
-      update: 'Change some fields of an item.',
-      delete: 'Delete an item.',
-    };
-    const listE = entries.find((e) => e.op === 'list' && e.mode === 'public');
-    const show = page.fields.filter((x) => !x.hidden && x.name !== '_id').slice(0, 3).map((x) => x.name);
-    const prop = (n) => (/^[A-Za-z_$][\w$]*$/.test(n) ? `item.${n}` : `item["${n}"]`);
-    bodyEl.innerHTML = `
-      <div class="card">
-        <div class="row"><h3 class="grow" style="margin:0">Docs for AI and developers</h3>
-          <a class="btn" href="${ctx.docsUrl(svcName, slug)}">📖 Swagger docs</a><button data-action="copyDocs">Copy text</button><button data-action="previewDocs">Preview</button><button class="btn-primary" data-action="downloadDocs">⬇ Download .txt</button></div>
-        <p class="small muted" style="margin-bottom:0">Everything about this API as plain text: address, what it allows, the fields and examples. Paste it into ChatGPT / Claude ("build me a page that shows these items"), a README or a message to a developer.</p>
-      </div>
-      ${
-        entries.length
-          ? entries
-              .map((e) => {
-                const d = details(info, e, page.fields);
-                return `<div class="card code-step">
-                  <div class="row"><span class="badge method-${e.method.toLowerCase()}">${e.method}</span><h3 class="grow" style="margin:0">${e.verb}</h3>${e.mode === 'key' ? '<span class="badge warn">🔑 needs a key</span>' : '<span class="badge ok">🌐 anyone</span>'}</div>
-                  <p class="small" style="margin:6px 0">${plainSteps[e.op]}${e.mode === 'key' ? ' Do this from your server (backend), where the key stays secret.' : ''}</p>
-                  <div class="seg code-tabs" data-k="${e.op}"><button class="on" data-action="codeTab" data-k="${e.op}" data-lang="js">JavaScript</button><button data-action="codeTab" data-k="${e.op}" data-lang="curl">curl</button></div>
-                  <pre class="log" data-code="${e.op}-js">${esc(fetchFor(info, e, d, { node: e.mode === 'key' }))}</pre>
-                  <pre class="log hidden" data-code="${e.op}-curl">${esc(curlFor(info, e, d))}</pre>
-                </div>`;
-              })
-              .join('')
-          : '<div class="card empty">Nothing is switched on yet. Open "What it can do".</div>'
-      }
-      ${
-        listE
-          ? `<div class="card"><h3 style="margin-top:0">A ready web page</h3><p class="small muted" style="margin-top:0">Save it as <span class="mono">index.html</span> on any website. It lists the items.</p>
-          <pre class="log">${esc(`<!doctype html>
-<html>
-<body>
-  <h1>${a.title}</h1>
-  <ul id="items">Loading…</ul>
-  <script>
-    fetch("${url}?limit=20")
-      .then((r) => r.json())
-      .then(({ data }) => {
-        document.getElementById("items").innerHTML = data
-          .map((item) => "<li>" + ${show.length ? show.map((n) => `(${prop(n)} ?? "")`).join(' + " · " + ') : 'JSON.stringify(item)'} + "</li>")
-          .join("");
-      });
-  </script>
-</body>
-</html>`)}</pre>${info.cors && !info.cors.includes('*') ? '<p class="small muted">The website\'s address must be in the API server\'s allowed websites (CORS).</p>' : ''}</div>`
-          : ''
-      }
-      <details class="card"><summary><b>Full reference</b> (every option, for developers)</summary>
-        <h4>Item fields</h4>${modelHtml(page.fields)}
-        ${entries.map((e) => endpointHtml(info, e, page.fields)).join('')}
-      </details>`;
-  }
-
   // ---------- keys ----------
 
   function drawKeys() {
@@ -1199,16 +1143,7 @@ async function renderApi(el, ctx, svcName, slug, tab) {
       const op = m === 'POST' ? 'create' : m === 'DELETE' ? 'delete' : m !== 'GET' ? 'update' : /\/count(\?|$)/.test(path) ? 'count' : /^\/api\/[^/?]+\/[^/?]+/.test(path) ? 'get' : 'list';
       await act(op, m, path, parsed, `${m} ${path}`);
     },
-    codeTab: ({ k, lang }) => {
-      bodyEl.querySelectorAll(`[data-code^="${k}-"]`).forEach((x) => x.classList.toggle('hidden', x.dataset.code !== `${k}-${lang}`));
-      bodyEl.querySelectorAll(`.code-tabs[data-k="${k}"] button`).forEach((x) => x.classList.toggle('on', x.dataset.lang === lang));
-    },
-    copyDocs: async () => copy(await textFor(ctx, info, [slug])),
     downloadDocs: async () => downloadText(`${slug}-api.txt`, await textFor(ctx, info, [slug])),
-    previewDocs: async () => {
-      const text = await textFor(ctx, info, [slug]);
-      modal({ title: `${slug}-api.txt`, wide: true, body: `<pre class="log" style="max-height:62vh;white-space:pre-wrap">${esc(text)}</pre>`, actions: [{ label: 'Close' }, { label: '⬇ Download .txt', className: 'btn-primary', onClick: () => downloadText(`${slug}-api.txt`, text) }] });
-    },
     newKey,
     revoke: async ({ id }) => {
       const k = info.keys.find((x) => x.id === id);
