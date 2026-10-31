@@ -1,5 +1,5 @@
 import { api, esc, toast, loadingHtml, errorHtml, session, can } from './ui.js';
-import { startUpdateWatch } from './updates.js';
+import { startUpdateWatch, paintUnread } from './updates.js';
 
 // Two areas:
 //   Portal  (#/servers, #/account, #/admin/...) - pick a server, your account, administration
@@ -10,6 +10,8 @@ import { startUpdateWatch } from './updates.js';
 const views = {
   servers: () => import('./views/servers.js'),
   account: () => import('./views/account.js'),
+  people: () => import('./views/people.js'),
+  messages: () => import('./views/messages.js'),
   'admin-users': () => import('./views/admin-users.js'),
   'admin-roles': () => import('./views/admin-roles.js'),
   'admin-activity': () => import('./views/admin-activity.js'),
@@ -32,6 +34,8 @@ const views = {
 const VIEW_PERMISSION = {
   servers: null,
   account: null,
+  people: null,
+  messages: null,
   'admin-users': 'owner',
   'admin-roles': 'owner',
   'admin-activity': 'owner',
@@ -52,13 +56,13 @@ const VIEW_PERMISSION = {
 
 const SERVER_NAV = [
   ['Overview', [['dashboard', '◉', 'Dashboard'], ['terminal', '›_', 'Terminal'], ['files', '▤', 'File Manager']]],
-  ['Software', [['apps', '⬇', 'App Store'], ['services', '⚙', 'Services'], ['storage', '◔', 'Disk & cleanup']]],
+  ['Software', [['apps', '⬇', 'App Store'], ['services', '⚙', 'Services'], ['storage', '▦', 'Disk & cleanup']]],
   ['Hosting', [['sites', '◎', 'Websites'], ['nodeapps', '⬢', 'Node Apps'], ['databases', '⛁', 'Databases'], ['apis', '⇄', 'APIs']]],
   ['Security', [['firewall', '⛨', 'Firewall'], ['jobs', '☰', 'Tasks']]],
 ];
 
 const PORTAL_NAV = [
-  ['', [['servers', '▣', 'All servers', '#/servers']]],
+  ['', [['servers', '▣', 'All servers', '#/servers'], ['people', '☺', 'Team', '#/people'], ['messages', '✉', 'Messages', '#/messages']]],
   [
     'Administration',
     [
@@ -74,6 +78,8 @@ const PORTAL_NAV = [
 const TITLES = {
   servers: 'Servers',
   account: 'My account',
+  people: 'Team',
+  messages: 'Messages',
   'admin-users': 'Administration',
   'admin-roles': 'Administration',
   'admin-activity': 'Administration',
@@ -192,15 +198,18 @@ function renderShell(current) {
         <a class="brand" href="#/servers"><span class="brand-logo">▣</span><span class="brand-name">Serverboy</span></a>
         <div class="crumb">${crumb}</div>
         <span class="grow"></span>
+        <a class="topbar-bell" href="#/messages" title="Messages">✉<span id="msg-count" class="bell-count hidden"></span></a>
         <div class="usermenu">
           <button id="user-btn" class="row" aria-haspopup="true">
-            <span class="avatar">${esc(initials)}</span>
+            <span class="avatar" ${user.color ? `style="background:${esc(user.color)}"` : ''}>${user.avatar ? `<img src="${esc(user.avatar)}" alt="">` : esc(initials)}</span>
             <span class="who"><span>${esc(user.username)}</span><small>${esc(user.role)}</small></span>
             <span>▾</span>
           </button>
           <div class="menu hidden">
             <div class="menu-head">Signed in as <b>${esc(user.username)}</b> · ${esc(user.role)}</div>
-            <a href="#/account">✎ My account</a>
+            <a href="#/people/me">☺ My profile</a>
+            <a href="#/account">✎ Password & login</a>
+            <a href="#/messages">✉ Messages</a>
             ${user.isOwner ? '<a href="#/admin/users">☺ Administration</a>' : ''}
             <a href="#/servers">▣ All servers</a>
             <hr>
@@ -256,6 +265,7 @@ async function route() {
   state.cleanup?.();
   state.cleanup = null;
   const server = renderShell(current);
+  paintUnread();
   const container = document.getElementById('view');
   container.innerHTML = loadingHtml();
   try {

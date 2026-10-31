@@ -1,6 +1,6 @@
 {
   "name": "serverboy",
-  "version": "0.9.1",
+  "version": "1.0.0",
   "description": "A self-hosted web control panel for managing Linux servers over SSH — install software, manage services, files, databases, websites and Node.js apps.",
   "main": "server.js",
   "private": true,

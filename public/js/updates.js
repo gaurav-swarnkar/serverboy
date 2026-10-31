@@ -1,7 +1,7 @@
 // Tells people when Serverboy was updated while they had it open, and shows the owner's
 // message to the team. Only tabs running an older version get the update notice; the
 // owner's message goes to everyone or only to those tabs, as the owner chose.
-import { api, esc, modal, clientInfo } from './ui.js';
+import { api, esc, modal, toast, clientInfo } from './ui.js';
 
 const state = { loaded: null, latest: null, info: null, timer: null };
 const store = {
@@ -100,6 +100,29 @@ function draw() {
   };
 }
 
+// The ✉ count in the top bar, and a toast when new messages arrive.
+let lastUnread = null;
+export function paintUnread() {
+  const n = Number(state.info?.unread) || 0;
+  const badge = document.getElementById('msg-count');
+  if (badge) {
+    badge.textContent = n > 9 ? '9+' : String(n);
+    badge.classList.toggle('hidden', !n);
+  }
+  return n;
+}
+
+function drawUnread() {
+  const n = paintUnread();
+  if (lastUnread !== null && n > lastUnread && !location.hash.startsWith('#/messages')) toast(`✉ You have ${n} unread message${n === 1 ? '' : 's'}. Open Messages to read.`, 'ok', 8000);
+  lastUnread = n;
+}
+
+// Called by the messages page after reading, and by the shell after it is drawn.
+export function refreshUnread() {
+  check();
+}
+
 export async function check() {
   try {
     state.info = await api('/version');
@@ -108,6 +131,7 @@ export async function check() {
       clientInfo.build = state.info.build;
     }
     draw();
+    drawUnread();
   } catch {
     /* offline or logged out: try again later */
   }

@@ -56,9 +56,11 @@ api.get('/team/clients', auth.requirePermission('owner'), (req, res) => {
   const since = Date.now() - 24 * 3600 * 1000;
   res.json({ build: version.build, clients: [...clients.values()].filter((c) => c.at > since).sort((a, b) => b.at - a.at) });
 });
-api.get('/version', (req, res) => {
-  res.json({ version: version.version, build: version.build, startedAt: version.startedAt, changelog: version.changelog, announcement: store.getAnnouncement() });
+const people = require('./routes/people');
+api.get('/version', async (req, res) => {
+  res.json({ version: version.version, build: version.build, startedAt: version.startedAt, changelog: version.changelog, announcement: store.getAnnouncement(), unread: await people.unreadCount(req.user) });
 });
+api.use(people);
 api.use(require('./routes/servers'));
 api.use(require('./routes/team'));
 

@@ -5,6 +5,7 @@ const ssh = require('../lib/ssh');
 const nginx = require('../lib/nginx');
 const jobs = require('../lib/jobs');
 const scope = require('../lib/scope');
+const team = require('../lib/team');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
@@ -25,7 +26,10 @@ router.post('/sites', async (req, res) => {
   const aliases = String(body.aliases || '')
     .split(/[\s,]+/)
     .filter(Boolean);
-  res.json(await nginx.createSite(req.params.id, { ...body, aliases, restrictRoot: !req.user.isOwner }));
+  // Every new website starts in test mode until the owner makes it live.
+  const site = await nginx.createSite(req.params.id, { ...body, aliases, restrictRoot: !req.user.isOwner, testMode: true });
+  team.audit({ user: req.user.username, ip: req.ip, action: `Created website ${site.domain} (test mode)` });
+  res.json(site);
 });
 
 router.get('/sites/:name/config', async (req, res) => {
@@ -61,6 +65,17 @@ router.post('/sites/:name/toggle', async (req, res) => {
   res.json({ ok: true });
 });
 
+// Test mode on (anyone who may edit the site) or off = make it live (owner only).
+router.post('/sites/:name/test-mode', async (req, res) => {
+  scope.requireSite(req, req.params.name, 'edit');
+  const name = path.basename(nginx.siteFile(req.params.name));
+  const on = Boolean(req.body?.on);
+  if (!on && !req.user.isOwner) throw new HttpError(403, 'Only the owner (super admin) can make a website live.');
+  const token = await nginx.setTestMode(req.params.id, name, on);
+  team.audit({ user: req.user.username, ip: req.ip, action: on ? `Put website ${name} in test mode` : `Made website ${name} live` });
+  res.json({ testMode: on, previewToken: token });
+});
+
 router.delete('/sites/:name', async (req, res) => {
   scope.requireSite(req, req.params.name, 'all');
   const file = nginx.siteFile(req.params.name);
@@ -73,7 +88,7 @@ router.delete('/sites/:name', async (req, res) => {
     // Only remove web roots that live under /var/www/<site>.
     if (root.startsWith(`/var/www/${name}`)) removeRoot = ` && rm -rf -- ${q(`/var/www/${name}`)}`;
   }
-  await ssh.exec(serverId, `rm -f ${q(path.join(nginx.ENABLED, name))} ${q(file)}${removeRoot}`, { sudo: true, check: true });
+  await ssh.exec(serverId, `rm -f ${q(path.join(nginx.ENABLED, name))} ${q(file)} ${q(`/etc/nginx/serverboy/test-mode/${name}.conf`)}${removeRoot}`, { sudo: true, check: true });
   await nginx.testAndReload(serverId);
   res.json({ ok: true });
 });

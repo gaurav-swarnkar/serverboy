@@ -9,10 +9,13 @@ export async function render(el, { server }) {
       <div><h1>Websites</h1><div class="sub">Host domains with Nginx: static sites, PHP sites, or a proxy to a Node app. Free SSL included.</div></div>
       ${hasAll('sites') ? '<button class="btn-primary" data-action="add">+ Add website</button>' : ''}
     </div>
+    <div class="notice">New websites start in <b>test mode</b>: visitors see "Coming soon" and search engines stay away. Your team opens it with the preview link. ${can('owner') ? 'Click <b>Make live</b> when it is ready.' : 'The owner makes it live.'}</div>
     <div class="notice">Before adding a domain, create an <b>A record</b> at your domain registrar pointing to <span class="mono">${esc(server.host)}</span>, and allow ports <b>80</b> and <b>443</b> in the Azure VM's Networking settings.</div>
     <div class="card flush"><div id="list">${loadingHtml()}</div></div>`;
 
   const list = el.querySelector('#list');
+
+  const previewUrl = (s) => `${s.ssl ? 'https' : 'http'}://${s.serverNames[0]}/__serverboy-preview?t=${s.previewToken}`;
 
   async function load() {
     try {
@@ -29,10 +32,12 @@ export async function render(el, { server }) {
             (s, i) => `<tr>
             <td><b>${esc(s.name)}</b><div class="small muted">${s.serverNames.map(esc).join(', ')}</div></td>
             <td class="mono small">${s.proxy ? `→ ${esc(s.proxy)}` : esc(s.root || '')}</td>
-            <td>${s.enabled ? '<span class="badge ok">enabled</span>' : '<span class="badge">disabled</span>'}</td>
+            <td>${!s.enabled ? '<span class="badge">disabled</span>' : s.testMode ? '<span class="badge warn" title="Only people with the preview link can see it">test mode</span>' : '<span class="badge ok">live</span>'}</td>
             <td>${s.ssl ? '<span class="badge ok">https</span>' : s.access === 'view' ? '<span class="badge">no SSL</span>' : `<button class="btn-sm" data-action="ssl" data-i="${i}">Enable SSL</button>`}</td>
             <td class="actions">
-              ${s.serverNames[0] && s.serverNames[0] !== '_' ? `<a class="btn btn-sm" href="${s.ssl ? 'https' : 'http'}://${esc(s.serverNames[0])}" target="_blank" rel="noopener">Visit</a>` : ''}
+              ${s.serverNames[0] && s.serverNames[0] !== '_' ? (s.testMode ? `<a class="btn btn-sm" href="${esc(previewUrl(s))}" target="_blank" rel="noopener" title="Opens the site with the preview link">Preview</a><button class="btn-sm" data-action="copyPreview" data-i="${i}" title="Copy the preview link to share">⧉ Link</button>` : `<a class="btn btn-sm" href="${s.ssl ? 'https' : 'http'}://${esc(s.serverNames[0])}" target="_blank" rel="noopener">Visit</a>`) : ''}
+              ${s.testMode && can('owner') && s.enabled ? `<button class="btn-sm btn-primary" data-action="goLive" data-i="${i}">Make live</button>` : ''}
+              ${!s.testMode && s.access !== 'view' && s.enabled && s.serverNames[0] !== '_' ? `<button class="btn-sm" data-action="testMode" data-i="${i}" title="Hide it behind the preview link again">Test mode</button>` : ''}
               ${s.root ? `<button class="btn-sm" data-action="files" data-root="${esc(s.root)}">Files</button>` : ''}
               <button class="btn-sm" data-action="config" data-i="${i}">Config</button>
               ${s.access === 'view' ? '<span class="badge">view only</span>' : `<button class="btn-sm" data-action="toggle" data-i="${i}">${s.enabled ? 'Disable' : 'Enable'}</button>`}
@@ -74,7 +79,7 @@ export async function render(el, { server }) {
         submit: (v) => api(`${base}/sites`, { method: 'POST', body: v }),
       });
       if (created) {
-        toast(`Website ${created.domain} created`, 'ok');
+        toast(`Website ${created.domain} created in test mode. Use Preview to see it.`, 'ok');
         load();
       }
     },
@@ -125,6 +130,23 @@ export async function render(el, { server }) {
           },
         ] : [{ label: 'Close' }],
       });
+    },
+    copyPreview: ({ i }) => {
+      const url = previewUrl(sites[i]);
+      navigator.clipboard?.writeText(url).then(() => toast('Preview link copied. Anyone with it can see the site.', 'ok')).catch(() => modal({ title: 'Preview link', body: `<pre class="log">${esc(url)}</pre>`, actions: [{ label: 'Close' }] }));
+    },
+    goLive: async ({ i }, btn) => {
+      const s = sites[i];
+      if (!(await confirmDialog(`Make ${s.name} live? Everyone on the internet can see it, and search engines may list it.`, { confirmLabel: 'Make live' }))) return;
+      const ok = await run(btn, () => api(`${base}/sites/${encodeURIComponent(s.name)}/test-mode`, { method: 'POST', body: { on: false } }), `${s.name} is live`);
+      if (ok) load();
+    },
+    testMode: async ({ i }, btn) => {
+      const s = sites[i];
+      const warn = s.proxy ? ' This site forwards to an app or API: anything that calls it (websites, mobile apps) stops working until it is live again.' : '';
+      if (!(await confirmDialog(`Put ${s.name} back in test mode? Visitors see "Coming soon" until it is made live again.${warn}`, { danger: Boolean(s.proxy), confirmLabel: 'Test mode' }))) return;
+      const ok = await run(btn, () => api(`${base}/sites/${encodeURIComponent(s.name)}/test-mode`, { method: 'POST', body: { on: true } }), `${s.name} is in test mode`);
+      if (ok) load();
     },
     toggle: async ({ i }, btn) => {
       const s = sites[i];
