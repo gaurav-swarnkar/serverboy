@@ -1,6 +1,7 @@
 import { api, esc, toast, loadingHtml, errorHtml, session, can } from './ui.js';
 import { startUpdateWatch, paintUnread } from './updates.js';
 import { icon, logo } from './icons.js';
+import { getTheme, setTheme, shownTheme } from './theme.js';
 
 // Two areas:
 //   Portal  (#/servers, #/account, #/admin/...) - pick a server, your account, administration
@@ -108,7 +109,9 @@ window.addEventListener('sb:logout', () => showLogin());
 window.addEventListener('hashchange', route);
 // Close the account menu when clicking anywhere else.
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('.usermenu')) document.querySelector('.usermenu .menu')?.classList.add('hidden');
+  for (const wrap of document.querySelectorAll('.usermenu, .side-switch')) {
+    if (!wrap.contains(e.target)) wrap.querySelector('.menu')?.classList.add('hidden');
+  }
 });
 
 function parseHash() {
@@ -228,10 +231,17 @@ function renderShell(current) {
       </aside>
       <header class="topbar">
         <button id="menu-toggle" class="icon-btn" aria-label="Menu">${icon('menu', 20)}</button>
-        <div class="top-title"><b id="top-title">${esc(title)}</b><span id="top-tagline">${esc(tagline ? `“${tagline}”` : '')}</span></div>
+        <div class="top-title"><b id="top-title">${esc(title)}</b><span id="top-tagline">${esc(tagline)}</span></div>
         <div class="top-search">
           ${icon('search', 17)}<input id="top-search" placeholder="Search anything" autocomplete="off" aria-label="Search pages and servers"><kbd>⌘</kbd><kbd>K</kbd>
           <div class="menu search-menu hidden" id="search-menu"></div>
+        </div>
+        <div class="usermenu theme-menu">
+          <button class="icon-btn" id="theme-btn" title="Theme" aria-haspopup="true">${icon(shownTheme() === 'dark' ? 'moon' : 'sun', 20)}</button>
+          <div class="menu hidden" id="theme-list">
+            <div class="menu-head">Theme</div>
+            ${[['light', 'sun', 'Light'], ['dark', 'moon', 'Dark'], ['auto', 'monitor', 'Auto (like this computer)']].map(([t, i, l]) => `<a href="#" data-theme-pick="${t}" class="${getTheme() === t ? 'on' : ''}">${icon(i, 16)} ${l}</a>`).join('')}
+          </div>
         </div>
         <a class="icon-btn" href="${user.isOwner ? '#/admin/settings' : '#/account'}" title="Settings">${icon('settings', 20)}</a>
         <a class="icon-btn" href="https://github.com/gaurav-swarnkar/serverboy#readme" target="_blank" rel="noopener" title="Help">${icon('help', 20)}</a>
@@ -263,6 +273,18 @@ function renderShell(current) {
   app.querySelector('#user-btn').addEventListener('click', () => menu.classList.toggle('hidden'));
   menu.addEventListener('click', (e) => {
     if (e.target.closest('a')) menu.classList.add('hidden');
+  });
+  const themeList = app.querySelector('#theme-list');
+  app.querySelector('#theme-btn').addEventListener('click', () => themeList.classList.toggle('hidden'));
+  themeList.addEventListener('click', (e) => {
+    const pick = e.target.closest('[data-theme-pick]');
+    if (!pick) return;
+    e.preventDefault();
+    setTheme(pick.dataset.themePick);
+    themeList.classList.add('hidden');
+    themeList.querySelectorAll('a').forEach((a) => a.classList.toggle('on', a === pick));
+    app.querySelector('#theme-btn').innerHTML = icon(shownTheme() === 'dark' ? 'moon' : 'sun', 20);
+    window.dispatchEvent(new Event('sb:theme'));
   });
   const serverMenu = app.querySelector('#server-menu');
   app.querySelector('#server-switch')?.addEventListener('click', () => serverMenu.classList.toggle('hidden'));
@@ -330,7 +352,7 @@ function syncPageHead() {
     const sub = head.querySelector('.sub')?.textContent.trim();
     const tag = document.getElementById('top-tagline');
     // Only write when it differs: writing triggers the observer again.
-    if (sub && tag.textContent !== `“${sub}”`) tag.textContent = `“${sub}”`;
+    if (sub && tag.textContent !== sub) tag.textContent = sub;
   }
 }
 new MutationObserver(() => syncPageHead()).observe(document.getElementById('app'), { childList: true, subtree: true });

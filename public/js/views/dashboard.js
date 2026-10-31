@@ -2,39 +2,54 @@ import { api, esc, fmtBytes, fmtDuration, run, confirmDialog, showJob, onAction,
 import { mountHealth } from './health-card.js';
 import { icon } from '../icons.js';
 
-const HISTORY = 18; // samples in the live chart (one every 5 s)
+const HISTORY = 36; // samples kept for the live chart (one every 5 s)
 
 const pct = (used, total) => (total ? Math.round((used / total) * 100) : 0);
 
-// Mirrored bars like a cash-flow chart: CPU above the line, memory below.
-function usageChart(samples) {
-  const W = 640;
-  const H = 230;
-  const mid = 112;
-  const top = 14;
-  const half = mid - top;
-  const n = HISTORY;
-  const slot = (W - 44) / n;
-  const bw = Math.min(26, slot * 0.6);
-  const grid = [100, 50, 0, 50, 100]
-    .map((v, i) => {
-      const y = i < 2 ? mid - (v / 100) * half : i === 2 ? mid : mid + (v / 100) * half;
-      return `<line x1="40" x2="${W}" y1="${y}" y2="${y}" class="ch-grid"/><text x="0" y="${y + 4}" class="ch-label">${v}%</text>`;
-    })
+// Mirrored bars like a cash-flow chart: CPU above the line, memory below. Drawn at the card's
+// real pixel width (never stretched), with faint placeholders for slots not filled yet.
+function usageChart(samples, width) {
+  const W = Math.max(300, Math.round(width || 640));
+  const H = 240;
+  const left = 40;
+  const top = 10;
+  const mid = 108;
+  const half = mid - top - 4;
+  const n = Math.max(10, Math.min(HISTORY, Math.floor((W - left) / 34)));
+  const shown = samples.slice(-n);
+  const slot = (W - left) / n;
+  const bw = Math.max(8, Math.min(26, slot * 0.56));
+  const rx = Math.min(7, bw / 2);
+  const yUp = (v) => mid - 3 - (v / 100) * half;
+  const yDown = (v) => mid + 3 + (v / 100) * half;
+  const grid = [
+    [100, yUp(100)],
+    [50, yUp(50)],
+    [0, mid],
+    [50, yDown(50)],
+    [100, yDown(100)],
+  ]
+    .map(([v, y]) => `<line x1="${left}" x2="${W}" y1="${y}" y2="${y}" class="ch-grid"/><text x="${left - 8}" y="${y + 4}" text-anchor="end" class="ch-label">${v}%</text>`)
     .join('');
-  const bars = samples
-    .map((s, i) => {
-      const x = 44 + (n - samples.length + i) * slot + (slot - bw) / 2;
-      const c = Math.max(2, (s.cpu / 100) * half);
-      const m = Math.max(2, (s.mem / 100) * half);
-      const label = new Date(s.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      return `<g class="ch-col"><title>${label}\nCPU ${s.cpu}%\nMemory ${s.mem}%</title>
-        <rect x="${x}" y="${mid - c - 1}" width="${bw}" height="${c}" rx="6" class="ch-a"/>
-        <rect x="${x}" y="${mid + 1}" width="${bw}" height="${m}" rx="6" class="ch-b"/>
-        ${i % 4 === samples.length % 4 ? `<text x="${x + bw / 2}" y="${H - 2}" text-anchor="middle" class="ch-label">${label.replace(/:\d\d$/, '')}</text>` : ''}</g>`;
-    })
-    .join('');
-  return `<svg viewBox="0 0 ${W} ${H}" class="chart" preserveAspectRatio="none">${grid}${bars}</svg>`;
+  let cols = '';
+  for (let i = 0; i < n; i++) {
+    const x = left + i * slot + (slot - bw) / 2;
+    const smp = shown[i - (n - shown.length)];
+    if (!smp) {
+      cols += `<rect x="${x}" y="${yUp(100)}" width="${bw}" height="${half}" rx="${rx}" class="ch-track"/><rect x="${x}" y="${mid + 3}" width="${bw}" height="${half}" rx="${rx}" class="ch-track"/>`;
+      continue;
+    }
+    const c = Math.max(3, (smp.cpu / 100) * half);
+    const m = Math.max(3, (smp.mem / 100) * half);
+    const label = new Date(smp.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const showTime = (n - 1 - i) % Math.max(1, Math.round(n / 6)) === 0;
+    cols += `<g class="ch-col"><title>${label}\nCPU ${smp.cpu}%\nMemory ${smp.mem}%</title>
+      <rect x="${x - (slot - bw) / 2}" y="${top}" width="${slot}" height="${H - top - 22}" class="ch-hit"/>
+      <rect x="${x}" y="${mid - 3 - c}" width="${bw}" height="${c}" rx="${rx}" class="ch-a"/>
+      <rect x="${x}" y="${mid + 3}" width="${bw}" height="${m}" rx="${rx}" class="ch-b"/>
+      ${showTime ? `<text x="${Math.min(x + bw / 2, W - 2)}" y="${H - 4}" text-anchor="${x + bw / 2 > W - 36 ? 'end' : 'middle'}" class="ch-label">${label.replace(/:\d\d(?=\s*[AP]M|$)/i, '')}</text>` : ''}</g>`;
+  }
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="chart">${grid}${cols}</svg>`;
 }
 
 // Donut of the main disk: used vs free.
@@ -87,7 +102,7 @@ export async function render(el, { server }) {
           <div class="row"><h3 class="grow" style="margin:0">Live usage</h3><span class="legend"><i class="lg-a"></i>CPU <i class="lg-b"></i>Memory</span></div>
           <div class="small muted" style="margin-top:8px">Load average</div>
           <div class="big-value" id="d-load">–</div>
-          <div id="d-chart">${usageChart([])}</div>
+          <div id="d-chart" class="chart-box"></div>
         </div>
         <div class="card">
           <div class="row" style="margin-bottom:8px"><h3 class="grow" style="margin:0">Disks</h3>${can('system') ? `<a class="btn btn-sm" href="#/s/${server.id}/storage">Clean up</a>` : ''}</div>
@@ -107,6 +122,12 @@ export async function render(el, { server }) {
       </div>
     </div>`;
   const $ = (id) => el.querySelector(`#${id}`);
+  const drawChart = () => {
+    const box = $('d-chart');
+    if (box) box.innerHTML = usageChart(samples, box.clientWidth);
+  };
+  const resize = new ResizeObserver(() => drawChart());
+  resize.observe($('d-chart'));
 
   const stopHealth = mountHealth($('health'), server, {
     onData: (report) => {
@@ -154,7 +175,7 @@ export async function render(el, { server }) {
       m.querySelector('.mini-sub').textContent = minis[i][1];
     });
     $('d-load').innerHTML = `${s.load[0].toFixed(2)} <span class="small muted">· 5 min ${s.load[1].toFixed(2)} · 15 min ${s.load[2].toFixed(2)}</span>`;
-    $('d-chart').innerHTML = usageChart(samples);
+    drawChart();
 
     $('d-procs').innerHTML = `<div class="table-wrap"><table>
       <thead><tr><th>Process</th><th>PID</th><th>CPU</th><th>Memory</th><th></th></tr></thead>
@@ -217,6 +238,7 @@ export async function render(el, { server }) {
 
   return () => {
     stopped = true;
+    resize.disconnect();
     clearTimeout(timer);
     stopHealth();
   };
