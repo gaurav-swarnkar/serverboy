@@ -14,7 +14,7 @@ Give it your server's IP, username and password (or SSH key), and you can:
 | **Websites** | Create Nginx sites (static, single-page app, PHP, or reverse proxy to an app port). Edit config with automatic `nginx -t` rollback. Free Let's Encrypt SSL in one click. |
 | **Node Apps** | Deploy a Node.js app from Git (or from uploaded files), set environment variables, run it with PM2, put it on a domain, redeploy with one click, view logs. |
 | **Databases** | **MariaDB:** create databases + users, browse tables, run SQL, export (`.sql.gz`) and import. **MongoDB:** browse databases/collections/documents, insert and edit documents with a **form** (field types: text, number, yes/no, date, ObjectId, list, object…) or as JSON, delete documents, **import** a collection from a JSON / NDJSON / CSV file and **export** it as JSON, create per-app users (gives you the connection string), and turn on authentication with one click. |
-| **Data APIs** | Turn a MongoDB collection into a REST API in a few clicks: choose per endpoint (list / count / get / create / update / replace / delete) whether it is off, public or needs an API key; hide, protect and require fields; manage keys; try requests; get ready-to-paste code. Each collection also has a **Connect** guide for using the database from your backend and web pages. |
+| **APIs** | Let websites and apps use your MongoDB data over HTTPS. Make as many APIs as you like (several per collection if you want), each with its own rules: who may see, add, change or delete, which items and which fields. Try everything in a playground, copy ready code, download docs for AI assistants. |
 | **Firewall** | Manage UFW rules. It always allows your SSH port before turning on, so you can't lock yourself out. |
 | **Tasks** | Live logs of every install / deployment. |
 | **Administration** | Users, roles & permissions for your team, and an activity log of who did what (stored in MongoDB). Owner only. |
@@ -95,35 +95,26 @@ Private GitHub repo? Use `https://<token>@github.com/you/repo.git` with a fine-g
 
 Each app lives in `/var/www/<name>`, owned by your SSH user, with its settings in `.serverboy-app.json` and secrets in `.env`.
 
-## Data APIs (MongoDB collections over HTTPS)
+## APIs (MongoDB data over HTTPS)
 
-Hosting → **APIs** (or Databases → MongoDB → a collection → **API ↗**, which opens it in a new browser tab). Each API has its own page: the **API portal**, a collections list with **Endpoints & rules**, **Custom endpoints**, **Try it** (with request history and copy-as-curl) and **Docs** per collection, plus **API keys** and **Settings** (CORS, rate limit, address, engine update, delete).
+Hosting → **APIs**. An API is a named, safe door to one MongoDB collection, at `https://<api-server>/api/<name>`. Make as many as you like, also several for the same collection with different rules, e.g. **Products** (anyone can see) and **Products admin** (apps with a key can add, change and delete).
 
-1. **Create the API service** (once per database). Serverboy installs a small Node.js service in `/var/www/<name>` (run by PM2, visible under Node Apps), gives it its own MongoDB user that can only access that database, and optionally publishes it on a domain with HTTPS.
-2. **Open the collection** with a preset, then set each endpoint to *Off*, *Public* or *API key needed*:
+- **+ New API** asks three things: which data (database and collection, or a new one), what it is for (*Show it on a website*, *Website + my admin app*, *Private, for my own app*, *A form*, or *I'll choose myself*) and its name and address. The first API of a database also sets up that database's **API server** (a small Node.js service in `/var/www/<name>`, run by PM2, with its own MongoDB user limited to that database), optionally on a domain with HTTPS.
+- **Playground:** a live table of the items with **+ Add item**, **View**, **Edit** and **Delete**. Switch **Try as** between *Anyone on the internet* and *An app with a key*. Every answer is explained in plain words, with the request, the answer and the same request as `curl`. An *Advanced* box sends any request.
+- **What it can do:**
+  - *Who can do what*: for each of see the list, see one item, count, add, change and delete, choose *Nobody*, *Anyone* or *Apps with a key*.
+  - *Which items*: all, or only items where e.g. `status is published`. Values can come from the link (`?author=ravi`); such values are typed and only ever used as values, never as commands. Requests by id only reach items the API shows.
+  - *Fields*: show or hide each field, whether callers may fill it in, required when adding, or *always set to* a value. Tick *ignore unticked fields* for public forms.
+  - *Order and page size*, and the name, address, folder and description.
+- **Code & docs:** copy-paste JavaScript and `curl` for each allowed action, a ready web page that lists the items, the full reference, and **⬇ Download .txt** / Copy: a plain-text reference to paste into an AI assistant, a README or a message. The APIs page has **⬇ Docs for AI / developers** to download several APIs at once.
+- **Keys:** a key can be limited to one API (see, add, change, delete) or cover every API of its API server. Keys are stored only as hashes and shown once; apps send them in `x-api-key`.
+- **API server** (APIs page → *API servers* → Manage): its address (publish on a domain), allowed websites (CORS), rate limit, maximum page size, engine update, logs, delete.
 
-   | Endpoint | |
-   | --- | --- |
-   | `GET /api/<collection>` | list, with `?field=value`, `?filter={json}`, `?sort=-createdAt`, `?limit=&page=`, `?fields=` |
-   | `GET /api/<collection>/count` | count |
-   | `GET /api/<collection>/:id` | one document |
-   | `POST /api/<collection>` | create |
-   | `PATCH /api/<collection>/:id` | update some fields |
-   | `PUT /api/<collection>/:id` | replace |
-   | `DELETE /api/<collection>/:id` | delete |
+Changes apply within about 2 seconds without a restart. JavaScript query operators (`$where`, `$function`) are blocked.
 
-3. **Field rules:** *hidden* fields are never returned and cannot be filtered on; *read-only* fields cannot be written; *required* fields must be present on create; optional automatic `createdAt` / `updatedAt`.
-4. **API keys** (sent as `x-api-key`) can be read-only or read/write, for all collections or chosen ones. Keys are stored only as hashes and shown once.
-5. **Settings:** allowed websites (CORS), rate limit per minute, maximum page size.
-6. **Custom endpoints** add as many extra APIs per collection as you need, each with its own access and a **group** (e.g. Website, Mobile app, Admin):
-   - *List / Count / Get the first match*: `GET /api/<collection>/views/<name>?param=…` with a fixed filter, sort, fields and page size. Put `"{{param}}"` in the filter where a caller's value goes, e.g. `{ "status": "published", "author": "{{author}}" }`; parameters are typed (string, number, boolean, date, objectId) and only ever become values, never operators. A missing optional parameter removes its condition.
-   - *Create (form)*: `POST /api/<collection>/views/<name>` accepts only the fields you list, checks required fields and always saves fixed values (e.g. `{ "status": "new" }`).
-   Existing APIs need **Update engine** (engine v2) once before custom endpoints answer.
-7. **API portal:** every endpoint of the API in one searchable catalog, grouped by collection and group, with a reference page for each (parameters, body fields, data model inferred from your documents, responses, curl and JavaScript examples). Tick any endpoints and **Download .txt** (or Copy / Preview): a plain-text reference made to paste into an AI assistant, a README or a ticket. Each endpoint and each collection's Docs tab can be downloaded on its own too.
+**Upgrading from an older version:** APIs made before 0.7 show *"runs an older API engine"*. Click **Update engine** once: each collection's endpoints become an API at the same address, each custom endpoint becomes its own API (old `/api/<collection>/views/<name>` addresses keep working), and keys keep their access. A backup of the old settings is kept as `api.config.json.bak-v2`.
 
-Changes apply within about 2 seconds without a restart. JavaScript query operators (`$where`, `$function`) are blocked. The **Try it** box sends real requests from the server, and **How to call it** shows URLs plus `fetch` and `curl` examples for your configuration.
-
-Rule of thumb: make reading public only for data anyone may see, and never put a key that can write into web page code. Call write endpoints from your backend.
+Rule of thumb: let *anyone* see only data anyone may see, and never put a key that can change data into web page code. Call those actions from your backend.
 
 ## Team accounts and permissions
 

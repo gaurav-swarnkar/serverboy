@@ -1,5 +1,5 @@
 import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, fmtBytes, onAction, loadingHtml, errorHtml, randomPassword, can, hasAll } from '../ui.js';
-import { mountApiSummary, mountConnectGuide, apiPageUrl } from './data-api.js';
+import { mountConnectGuide } from './data-api.js';
 import { docForm } from './doc-form.js';
 
 // Only engines installed on the server are shown (most people use just one).
@@ -328,16 +328,13 @@ function renderMongo(el, server) {
         <button class="btn-sm btn-danger" data-action="dropCol">Drop collection</button>` : ''}
         ${canEditDb(current.db) ? '' : '<span class="badge">view only</span>'}
         ${tab === 'docs' && canEditDb(current.db) ? '<button class="btn-sm" data-action="importCol" title="Add documents from a JSON or CSV file">⬆ Import</button>' : ''}
-        ${tab === 'docs' ? `<a class="btn btn-sm" href="/api${base}/databases/${encodeURIComponent(current.db)}/collections/${encodeURIComponent(current.collection)}/export" download title="Download all documents as JSON">⬇ Export</a>` : ''}
-        <a class="btn btn-sm" href="${apiPageUrl(server, current.db, current.collection)}" target="_blank" rel="noopener" title="Open this collection's API in a new browser tab">API ↗</a></div>
+        ${tab === 'docs' ? `<a class="btn btn-sm" href="/api${base}/databases/${encodeURIComponent(current.db)}/collections/${encodeURIComponent(current.collection)}/export" download title="Download all documents as JSON">⬇ Export</a>` : ''}</div>
       <div class="tabs">
         <button class="${tab === 'docs' ? 'active' : ''}" data-action="colTab" data-tab="docs">Documents</button>
-        <button class="${tab === 'api' ? 'active' : ''}" data-action="colTab" data-tab="api">API</button>
         <button class="${tab === 'connect' ? 'active' : ''}" data-action="colTab" data-tab="connect">Connect</button>
       </div>
       <div id="col-tab"></div>`;
     const tabEl = docsEl.querySelector('#col-tab');
-    if (tab === 'api') return mountApiSummary(tabEl, server, current.db, current.collection, canEditDb(current.db));
     if (tab === 'connect') return mountConnectGuide(tabEl, server, current.db, current.collection);
     tabEl.innerHTML = `
       <form id="find-form" class="row" style="margin-bottom:10px">

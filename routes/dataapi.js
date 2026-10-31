@@ -25,13 +25,12 @@ const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 const DB_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const COLL_RE = /^[A-Za-z0-9_.-]{1,120}$/;
 const FIELD_RE = /^[A-Za-z0-9_.-]{1,100}$/;
-const ENDPOINTS = ['list', 'count', 'get', 'create', 'update', 'replace', 'delete'];
+const API_OPS = ['list', 'get', 'count', 'create', 'update', 'delete'];
 const MODES = ['off', 'public', 'key'];
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,40}$/;
 const OPS = ['read', 'create', 'update', 'delete'];
 const ENGINE_VERSION = Number((fs.readFileSync(path.join(TEMPLATE_DIR, 'server.js'), 'utf8').match(/ENGINE_VERSION = (\d+)/) || [])[1]) || 1;
-const CUSTOM_KINDS = ['list', 'count', 'one', 'create'];
 const PARAM_TYPES = ['string', 'number', 'boolean', 'date', 'objectId'];
-const CUSTOM_ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 const PARAM_RE = /^[A-Za-z_][A-Za-z0-9_]{0,40}$/;
 const RESERVED_PARAMS = ['limit', 'skip', 'page', 'sort', 'fields', 'filter'];
 const FORBIDDEN_OPERATORS = ['$where', '$function', '$accumulator'];
@@ -57,6 +56,88 @@ async function saveConfig(serverId, name, cfg) {
 
 function publicConfig(cfg) {
   return { ...cfg, keys: (cfg.keys || []).map(({ hash, ...k }) => k) };
+}
+
+// ---------- settings format ----------
+// Engine v3 serves config.apis: { <slug>: { collection, ops, filter, fields… } }, several per
+// collection if you like. Older engines used config.collections (one set of endpoints per
+// collection, plus "custom endpoints"); "Update engine" converts those, keeping their addresses.
+
+const isMigrated = (cfg) => Boolean(cfg.apis);
+
+function slugify(text) {
+  return String(text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'api';
+}
+
+function blankApi(collection) {
+  return { title: collection.charAt(0).toUpperCase() + collection.slice(1), description: '', group: '', collection, ops: Object.fromEntries(API_OPS.map((o) => [o, 'off'])), filter: {}, params: [], sort: '', fields: '', hidden: [], readonly: [], required: [], writable: [], set: {}, timestamps: true, limit: 0, callerFilters: true, callerSort: true };
+}
+
+function migrate(cfg) {
+  if (isMigrated(cfg)) return cfg;
+  const apis = {};
+  const legacy = {};
+  const unique = (base) => {
+    let slug = slugify(base);
+    for (let i = 2; apis[slug]; i++) slug = `${slugify(base).slice(0, 36)}-${i}`;
+    return slug;
+  };
+  const bySlugs = {}; // collection -> slugs made from it (for keys)
+  const stronger = (a, b) => (a === 'public' || b === 'public' ? 'public' : a === 'key' || b === 'key' ? 'key' : 'off');
+  for (const [col, c] of Object.entries(cfg.collections || {})) {
+    const e = c.endpoints || {};
+    const slug = unique(col);
+    if (slug !== col) legacy[col] = slug;
+    apis[slug] = {
+      ...blankApi(col),
+      ops: { list: e.list || 'off', get: e.get || 'off', count: e.count || 'off', create: e.create || 'off', update: stronger(e.update, e.replace), delete: e.delete || 'off' },
+      hidden: c.hidden || [],
+      readonly: c.readonly || [],
+      required: c.required || [],
+      timestamps: Boolean(c.timestamps),
+    };
+    bySlugs[col] = [slug];
+    for (const v of c.custom || []) {
+      const vs = unique(`${col}-${v.id}`);
+      const read = v.kind !== 'create';
+      apis[vs] = {
+        ...blankApi(col),
+        title: v.title || v.id,
+        description: v.description || '',
+        group: v.group || '',
+        ops: { ...blankApi(col).ops, ...(read ? { [v.kind === 'count' ? 'count' : 'list']: v.mode || 'off' } : { create: v.mode || 'off' }) },
+        filter: v.filter || {},
+        params: v.params || [],
+        sort: v.sort || '',
+        fields: read ? v.fields || '' : '',
+        writable: read ? [] : String(v.fields || '').split(',').map((x) => x.trim()).filter(Boolean),
+        set: v.set || {},
+        hidden: c.hidden || [],
+        readonly: c.readonly || [],
+        required: [...new Set([...(read ? [] : c.required || []), ...(v.required || [])])],
+        timestamps: Boolean(c.timestamps),
+        limit: v.kind === 'one' ? 1 : Number(v.limit) || 0,
+        callerFilters: false,
+        callerSort: false,
+      };
+      legacy[`${col}/views/${v.id}`] = { api: vs, kind: v.kind };
+      bySlugs[col].push(vs);
+    }
+  }
+  const keys = (cfg.keys || []).map((k) => {
+    const access = {};
+    for (const [target, ops] of Object.entries(k.access || {})) {
+      if (target === '*') access['*'] = ops;
+      else for (const slug of bySlugs[target] || []) access[slug] = ops;
+    }
+    return { ...k, access };
+  });
+  const { collections, ...rest } = cfg;
+  return { ...rest, apis, legacy, keys };
+}
+
+async function requireMigrated(serverId, name, cfg) {
+  if (!isMigrated(cfg)) throw new HttpError(409, `${name} runs an older API engine. Click "Update engine" first (one click, nothing is lost).`);
 }
 
 async function freePort(serverId) {
@@ -116,7 +197,8 @@ echo "##PM2"; command -v pm2 >/dev/null && ${pm2.whenRunning('pm2 jlist 2>/dev/n
         port: app.port || null,
         domain: app.domain || null,
         status: proc ? proc.pm2_env?.status : 'not running',
-        collections: Object.keys(cfg.collections || {}),
+        apis: Object.entries(migrate(cfg).apis).map(([slug, a]) => ({ slug, title: a.title, collection: a.collection, group: a.group, description: a.description, ops: a.ops })),
+        needsUpgrade: !isMigrated(cfg),
         keys: (cfg.keys || []).length,
       });
     } catch {
@@ -149,7 +231,8 @@ router.get('/mongo/apis/:name', async (req, res) => {
   }
   const https = rest.join('').includes('/etc/nginx');
   res.json({
-    ...publicConfig(cfg),
+    ...publicConfig(migrate(cfg)),
+    needsUpgrade: !isMigrated(cfg),
     port: app.port,
     domain: app.domain || null,
     url: app.domain ? `${https ? 'https' : 'http'}://${app.domain}` : null,
@@ -207,7 +290,7 @@ command -v pm2 >/dev/null && ${pm2.whenRunning(`pm2 jlist 2>/dev/null | grep -qF
     cors: ['*'],
     rateLimitPerMinute: 300,
     maxLimit: 100,
-    collections: {},
+    apis: {},
     keys: [],
   };
   const cfg = { name, repo: '', branch: 'main', port, installCmd: '', buildCmd: '', startCmd: 'node server.js', domain };
@@ -273,32 +356,7 @@ function cleanFields(list) {
   });
 }
 
-router.put('/mongo/apis/:name/collections/:col', async (req, res) => {
-  const name = apiName(req.params.name);
-  const col = String(req.params.col);
-  if (!COLL_RE.test(col)) throw new HttpError(400, 'Invalid collection name');
-  const cfg = await loadConfig(req.params.id, name);
-  const endpoints = {};
-  for (const e of ENDPOINTS) {
-    const m = req.body?.endpoints?.[e] || 'off';
-    if (!MODES.includes(m)) throw new HttpError(400, `Endpoint ${e}: use off, public or key`);
-    endpoints[e] = m;
-  }
-  cfg.collections = cfg.collections || {};
-  cfg.collections[col] = {
-    endpoints,
-    hidden: cleanFields(req.body?.hidden),
-    readonly: cleanFields(req.body?.readonly),
-    required: cleanFields(req.body?.required),
-    timestamps: Boolean(req.body?.timestamps),
-    custom: cfg.collections[col]?.custom || [],
-  };
-  await saveConfig(req.params.id, name, cfg);
-  audit(req, `Data API ${name}: saved ${col} (${ENDPOINTS.filter((e) => endpoints[e] !== 'off').map((e) => `${e}=${endpoints[e]}`).join(', ') || 'all off'})`);
-  res.json(publicConfig(cfg));
-});
-
-// ---------- custom endpoints (saved queries and forms) ----------
+// ---------- APIs (one service can have many, several per collection) ----------
 
 function jsonObject(value, label) {
   let v = value;
@@ -327,15 +385,21 @@ function jsonObject(value, label) {
   return v;
 }
 
-function cleanCustom(body, col) {
-  const id = String(body?.id || '').trim().toLowerCase();
-  if (!CUSTOM_ID_RE.test(id)) throw new HttpError(400, 'Path name: lowercase letters, numbers, - and _ (e.g. published)');
-  const kind = CUSTOM_KINDS.includes(body?.kind) ? body.kind : 'list';
-  const mode = MODES.includes(body?.mode) ? body.mode : 'off';
+function cleanApi(body) {
+  const slug = String(body?.slug || '').trim().toLowerCase();
+  if (!SLUG_RE.test(slug)) throw new HttpError(400, 'Address: lowercase letters, numbers and - only (e.g. products or blog-posts)');
+  const collection = String(body?.collection || '').trim();
+  if (!COLL_RE.test(collection)) throw new HttpError(400, 'Choose which collection this API uses');
+  const ops = {};
+  for (const o of API_OPS) {
+    const m = body?.ops?.[o] || 'off';
+    if (!MODES.includes(m)) throw new HttpError(400, `${o}: use off, public or key`);
+    ops[o] = m;
+  }
   const params = (Array.isArray(body?.params) ? body.params : []).map((p) => {
     const name = String(p?.name || '').trim();
-    if (!PARAM_RE.test(name)) throw new HttpError(400, `Invalid parameter name "${name}"`);
-    if (RESERVED_PARAMS.includes(name)) throw new HttpError(400, `"${name}" is reserved for paging; pick another parameter name`);
+    if (!PARAM_RE.test(name)) throw new HttpError(400, `Invalid link value name "${name}"`);
+    if (RESERVED_PARAMS.includes(name)) throw new HttpError(400, `"${name}" is reserved for paging; pick another name`);
     return {
       name,
       type: PARAM_TYPES.includes(p.type) ? p.type : 'string',
@@ -344,67 +408,75 @@ function cleanCustom(body, col) {
       description: String(p.description || '').slice(0, 300),
     };
   });
-  if (new Set(params.map((p) => p.name)).size !== params.length) throw new HttpError(400, 'Two parameters have the same name');
-  const filter = kind === 'create' ? {} : jsonObject(body?.filter, 'Filter');
+  if (new Set(params.map((p) => p.name)).size !== params.length) throw new HttpError(400, 'Two link values have the same name');
+  const filter = jsonObject(body?.filter, 'Which items');
   const used = [...JSON.stringify(filter).matchAll(/"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}"/g)].map((m) => m[1]);
   const missing = used.filter((u) => !params.some((p) => p.name === u));
-  if (missing.length) throw new HttpError(400, `The filter uses {{${missing[0]}}}; add it as a parameter`);
-  const set = kind === 'create' ? jsonObject(body?.set, 'Fixed values') : {};
+  if (missing.length) throw new HttpError(400, `"Which items" uses {{${missing[0]}}}; add it as a value from the link`);
+  const set = jsonObject(body?.set, 'Fixed values');
   if (Object.keys(set).some((k) => k === '_id' || k.startsWith('$'))) throw new HttpError(400, 'Fixed values cannot set _id or use $ operators');
   const sort = String(body?.sort || '').trim();
-  if (sort && !sort.split(',').every((f) => FIELD_RE.test(f.trim().replace(/^-/, '')))) throw new HttpError(400, 'Sort: field names separated by commas, - for descending (e.g. -createdAt)');
+  if (sort && !sort.split(',').every((f) => FIELD_RE.test(f.trim().replace(/^-/, '')))) throw new HttpError(400, 'Order: field names separated by commas, - for newest / largest first (e.g. -createdAt)');
   return {
-    id,
-    title: String(body?.title || id).trim().slice(0, 80),
-    group: String(body?.group || '').trim().slice(0, 40),
-    description: String(body?.description || '').trim().slice(0, 1000),
-    kind,
-    mode,
-    filter,
-    sort: kind === 'create' || kind === 'count' ? '' : sort,
-    fields: cleanFields(body?.fields).join(','),
-    limit: kind === 'list' ? Math.max(1, Math.min(Number(body?.limit) || 20, 1000)) : undefined,
-    params: kind === 'create' ? [] : params,
-    set,
-    required: kind === 'create' ? cleanFields(body?.required) : [],
-    collection: col,
+    slug,
+    api: {
+      title: String(body?.title || slug).trim().slice(0, 80),
+      description: String(body?.description || '').trim().slice(0, 1000),
+      group: String(body?.group || '').trim().slice(0, 40),
+      collection,
+      ops,
+      filter,
+      params,
+      sort,
+      fields: cleanFields(body?.fields).join(','),
+      hidden: cleanFields(body?.hidden),
+      readonly: cleanFields(body?.readonly),
+      required: cleanFields(body?.required),
+      writable: cleanFields(body?.writable),
+      set,
+      timestamps: body?.timestamps !== false,
+      limit: Math.max(0, Math.min(Number(body?.limit) || 0, 1000)),
+      callerFilters: body?.callerFilters !== false,
+      callerSort: body?.callerSort !== false,
+    },
   };
 }
 
-router.put('/mongo/apis/:name/collections/:col/custom/:cid', async (req, res) => {
+// Create (slug "new") or change an API; renaming its address moves keys and old addresses along.
+router.put('/mongo/apis/:name/resources/:slug', async (req, res) => {
   const name = apiName(req.params.name);
-  const col = String(req.params.col);
   const cfg = await loadConfig(req.params.id, name);
-  const c = cfg.collections?.[col];
-  if (!c) throw new HttpError(404, `Expose ${col} first`);
-  const ep = cleanCustom(req.body, col);
-  delete ep.collection;
-  const list = (c.custom || []).filter((x) => x.id !== req.params.cid);
-  if (list.some((x) => x.id === ep.id)) throw new HttpError(409, `${col} already has an endpoint named "${ep.id}"`);
-  const at = (c.custom || []).findIndex((x) => x.id === req.params.cid);
-  list.splice(at < 0 ? list.length : at, 0, ep);
-  c.custom = list;
+  await requireMigrated(req.params.id, name, cfg);
+  const { slug, api } = cleanApi(req.body);
+  const old = req.params.slug;
+  if (slug !== old && cfg.apis[slug]) throw new HttpError(409, `There is already an API at /api/${slug}`);
+  const next = {};
+  for (const [k, v] of Object.entries(cfg.apis)) next[k === old ? slug : k] = k === old ? api : v;
+  if (!(slug in next)) next[slug] = api;
+  cfg.apis = next;
+  if (slug !== old && old !== 'new') {
+    for (const k of cfg.keys || []) if (k.access?.[old]) {
+      k.access[slug] = k.access[old];
+      delete k.access[old];
+    }
+    for (const [from, to] of Object.entries(cfg.legacy || {})) {
+      if (to === old) cfg.legacy[from] = slug;
+      else if (to && to.api === old) to.api = slug;
+    }
+  }
   await saveConfig(req.params.id, name, cfg);
-  audit(req, `Data API ${name}: saved custom endpoint ${col}/views/${ep.id} (${ep.kind}, ${ep.mode})`);
+  audit(req, `Data API ${name}: saved /api/${slug} on ${api.collection} (${API_OPS.filter((o) => api.ops[o] !== 'off').map((o) => `${o}=${api.ops[o]}`).join(', ') || 'all off'})`);
   res.json(publicConfig(cfg));
 });
 
-router.delete('/mongo/apis/:name/collections/:col/custom/:cid', async (req, res) => {
+router.delete('/mongo/apis/:name/resources/:slug', async (req, res) => {
   const name = apiName(req.params.name);
   const cfg = await loadConfig(req.params.id, name);
-  const c = cfg.collections?.[req.params.col];
-  if (c) c.custom = (c.custom || []).filter((x) => x.id !== req.params.cid);
+  await requireMigrated(req.params.id, name, cfg);
+  delete cfg.apis[req.params.slug];
+  for (const k of cfg.keys || []) delete k.access?.[req.params.slug];
   await saveConfig(req.params.id, name, cfg);
-  audit(req, `Data API ${name}: deleted custom endpoint ${req.params.col}/views/${req.params.cid}`);
-  res.json(publicConfig(cfg));
-});
-
-router.delete('/mongo/apis/:name/collections/:col', async (req, res) => {
-  const name = apiName(req.params.name);
-  const cfg = await loadConfig(req.params.id, name);
-  delete cfg.collections?.[req.params.col];
-  await saveConfig(req.params.id, name, cfg);
-  audit(req, `Data API ${name}: stopped exposing ${req.params.col}`);
+  audit(req, `Data API ${name}: deleted /api/${req.params.slug}`);
   res.json(publicConfig(cfg));
 });
 
@@ -434,10 +506,11 @@ router.post('/mongo/apis/:name/keys', async (req, res) => {
   const label = String(req.body?.label || '').trim().slice(0, 60);
   if (!label) throw new HttpError(400, 'Give the key a name, e.g. "website backend"');
   const access = {};
-  for (const [col, ops] of Object.entries(req.body?.access || {})) {
-    if (col !== '*' && !COLL_RE.test(col)) throw new HttpError(400, 'Invalid collection in access');
+  await requireMigrated(req.params.id, name, cfg);
+  for (const [target, ops] of Object.entries(req.body?.access || {})) {
+    if (target !== '*' && !cfg.apis[target]) throw new HttpError(400, `Unknown API "${target}"`);
     const clean = (Array.isArray(ops) ? ops : []).filter((o) => OPS.includes(o));
-    if (clean.length) access[col] = clean;
+    if (clean.length) access[target] = clean;
   }
   if (!Object.keys(access).length) throw new HttpError(400, 'Give the key at least one permission');
   const key = `sbk_${crypto.randomBytes(24).toString('base64url')}`;
@@ -551,6 +624,17 @@ router.post('/mongo/apis/:name/upgrade', async (req, res) => {
         },
       },
       { label: 'Installing dependencies', cmd: `cd ${q(dir(name))} && npm install --omit=dev --no-audit --no-fund` },
+      {
+        label: 'Converting settings to the new format',
+        fn: async (log) => {
+          const cfg = await loadConfig(serverId, name);
+          if (isMigrated(cfg)) return log('Already up to date.\n');
+          await ssh.exec(serverId, `cp -p ${q(configPath(name))} ${q(`${configPath(name)}.bak-v2`)}`);
+          const next = migrate(cfg);
+          await saveConfig(serverId, name, next);
+          log(`Saved ${Object.keys(next.apis).length} API(s): ${Object.keys(next.apis).map((x) => `/api/${x}`).join(', ') || 'none'}. Old addresses keep working. Backup: api.config.json.bak-v2\n`);
+        },
+      },
       { label: 'Checking PM2', fn: async (log) => log(`${await pm2.ensureDaemon(serverId)}\n`) },
       { label: 'Restarting', cmd: `pm2 restart ${q(name)} && pm2 save && sleep 2 && curl -s -m 10 http://127.0.0.1:$(grep -o '"port": *[0-9]*' ${q(`${dir(name)}/.serverboy-app.json`)} | grep -o '[0-9]*$')/health; echo` },
     ]),

@@ -301,32 +301,6 @@ details > summary { cursor: pointer; margin: 10px 0 6px; }
 .access-list { max-height: 240px; overflow-y: auto; }
 .access-list td { padding: 5px 8px; }
 
-/* ---------- APIs page ---------- */
-.api-ws { grid-template-columns: minmax(200px, 260px) 1fr; align-items: start; }
-.api-cols { display: flex; flex-direction: column; padding: 4px 0; }
-.api-col { display: flex; align-items: center; gap: 6px; padding: 7px 16px; color: var(--text); text-decoration: none; border-left: 3px solid transparent; }
-.api-col:hover { background: var(--panel-2); }
-.api-col.active { background: var(--panel-2); border-left-color: var(--accent); font-weight: 600; }
-@media (max-width: 820px) { .api-ws { grid-template-columns: 1fr; } }
-.ep-mode { width: 190px; }
-@media (max-width: 600px) { .ep-desc { display: none; } .ep-mode { width: auto; } }
-.pt-tree { max-height: 70vh; overflow: auto; padding-bottom: 8px; }
-.pt-col { border-top: 1px solid var(--border); padding: 6px 0; }
-.pt-colhead { margin: 0; padding: 4px 16px; font-weight: 600; }
-.pt-group { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 6px 16px 2px 40px; }
-.pt-ep { display: flex; align-items: center; gap: 6px; padding: 3px 12px 3px 16px; font-size: 13px; border-left: 3px solid transparent; }
-.pt-ep input { width: auto; }
-.pt-ep a { flex: 1; color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pt-ep a .badge { font-size: 10px; min-width: 44px; text-align: center; }
-.pt-ep:hover { background: var(--panel-2); }
-.pt-ep.active { background: var(--panel-2); border-left-color: var(--accent); }
-.pt-ep.off a { color: var(--muted); }
-.api-ref { margin-bottom: 12px; }
-.api-ref h4 { margin: 14px 0 6px; }
-.cu-params input, .cu-params select { padding: 4px 6px; }
-.api-ws > * { min-width: 0; }
-.api-ref pre, .api-ref table { max-width: 100%; }
-.api-ref pre { overflow-x: auto; }
 
 /* ---------- update notice / message from the owner ---------- */
 #sb-notices { position: fixed; left: 50%; transform: translateX(-50%); bottom: 16px; z-index: 55; display: flex; flex-direction: column; gap: 8px; width: min(720px, calc(100vw - 32px)); }
@@ -345,4 +319,48 @@ details > summary { cursor: pointer; margin: 10px 0 6px; }
   .df-head { display: none; }
   .df-row { grid-template-columns: 1fr 1fr 32px; border-bottom: 1px dashed var(--border); padding-bottom: 6px; }
   .df-row .df-value { grid-column: 1 / 3; grid-row: 2; }
+}
+
+/* ---------- APIs ---------- */
+.api-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.api-card { display: block; color: var(--text); text-decoration: none; padding: 14px 16px; transition: border-color .15s, box-shadow .15s; }
+.api-card:hover { border-color: var(--accent); box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+.api-card.add { display: flex; align-items: center; justify-content: center; color: var(--accent); font-weight: 600; border-style: dashed; min-height: 110px; }
+.api-group-title { margin: 18px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.api-empty { max-width: 680px; }
+.api-summary { background: var(--panel-2); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; }
+.api-ref { margin-bottom: 12px; }
+.api-ref h4 { margin: 14px 0 6px; }
+.api-ref pre, .code-step pre { overflow-x: auto; max-width: 100%; }
+.new-api .step { display: flex; gap: 14px; align-items: flex-start; }
+.new-api .step h3 { margin: 2px 0 10px; }
+.new-api .step > .grow { min-width: 0; }
+.step-n { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+.tpl { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer; margin: 0; }
+.tpl input { position: absolute; opacity: 0; pointer-events: none; }
+.tpl.on { border-color: var(--accent); background: var(--panel-2); box-shadow: 0 0 0 1px var(--accent) inset; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg > button, .seg > label { border: 0; border-radius: 0; margin: 0; padding: 6px 12px; background: var(--panel); color: var(--muted); cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; }
+.seg > * + * { border-left: 1px solid var(--border); }
+.seg > .on { background: var(--accent); color: #fff; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; width: auto; }
+.who td { vertical-align: middle; }
+.who td:last-child { text-align: right; }
+.pg-bar .row { gap: 8px; }
+.pg-table td { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-answer { border-left: 4px solid var(--accent); padding: 8px 12px; border-radius: 6px; background: var(--panel-2); }
+.pg-answer.ok { border-left-color: var(--ok, #16a34a); }
+.pg-answer.warn { border-left-color: var(--warn); }
+.pg-answer.bad { border-left-color: var(--bad); }
+.cond-row { display: grid; grid-template-columns: minmax(110px, 1fr) 140px 170px minmax(110px, 1fr) 100px auto 32px; gap: 6px; align-items: center; margin-bottom: 6px; }
+.fields-table td.c, .fields-table th { text-align: center; }
+.fields-table th:first-child, .fields-table td:first-child { text-align: left; }
+.save-bar { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; box-shadow: 0 -4px 16px rgba(0,0,0,.08); }
+.code-tabs { margin: 4px 0 8px; }
+@media (max-width: 820px) {
+  .cond-row { grid-template-columns: 1fr 1fr; }
+  .who td:last-child { text-align: left; }
+  .who tr { display: flex; flex-direction: column; }
+  .new-api .step { flex-direction: column; }
 }
