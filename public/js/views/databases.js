@@ -1,5 +1,5 @@
 import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, fmtBytes, onAction, loadingHtml, errorHtml, randomPassword, can, hasAll } from '../ui.js';
-import { mountConnectGuide } from './data-api.js';
+import { mountConnectGuide, mountCollectionApis, loadApiServices, apisFor } from './data-api.js';
 import { docForm } from './doc-form.js';
 
 // Only engines installed on the server are shown (most people use just one).
@@ -245,6 +245,7 @@ function renderMongo(el, server) {
   let dbs = [];
   const canEditDb = (name) => hasAll('databases') || dbs.find((d) => d.name === name)?.access === 'edit';
   let current = { db: null, collection: null, skip: 0 };
+  const apiServices = loadApiServices(server); // to show which collections have APIs
 
   el.innerHTML = `<div id="mongo-status"></div>
     <div class="grid" style="grid-template-columns: minmax(240px, 320px) 1fr; align-items:start">
@@ -311,9 +312,12 @@ function renderMongo(el, server) {
     }
     box.innerHTML = loadingHtml();
     try {
-      const cols = await api(`${base}/databases/${encodeURIComponent(db)}/collections`);
+      const [cols, svcs] = await Promise.all([api(`${base}/databases/${encodeURIComponent(db)}/collections`), apiServices]);
       box.innerHTML = `${cols
-        .map((c) => `<div class="row" style="padding:4px 12px 4px 32px"><span class="file-name grow" data-action="openCol" data-db="${esc(db)}" data-col="${esc(c.name)}">▤ ${esc(c.name)}</span><span class="small muted">${c.count ?? ''}</span></div>`)
+        .map((c) => {
+          const n = apisFor(svcs, db, c.name).length;
+          return `<div class="row" style="padding:4px 12px 4px 32px"><span class="file-name grow" data-action="openCol" data-db="${esc(db)}" data-col="${esc(c.name)}">▤ ${esc(c.name)}</span>${n ? `<span class="badge" title="${n} API(s) use this collection" data-action="openColApis" data-db="${esc(db)}" data-col="${esc(c.name)}">⇄ ${n} API${n === 1 ? '' : 's'}</span>` : ''}<span class="small muted">${c.count ?? ''}</span></div>`;
+        })
         .join('')}${canEditDb(db) ? `<div class="row" style="padding:4px 12px 8px 32px;gap:6px"><button class="btn-sm" data-action="newCol" data-db="${esc(db)}">+ Collection</button><button class="btn-sm" data-action="importCol" data-db="${esc(db)}" title="Import a collection from a JSON or CSV file">⬆ Import</button></div>` : ''}`;
     } catch (err) {
       box.innerHTML = errorHtml(err);
@@ -331,10 +335,17 @@ function renderMongo(el, server) {
         ${tab === 'docs' ? `<a class="btn btn-sm" href="/api${base}/databases/${encodeURIComponent(current.db)}/collections/${encodeURIComponent(current.collection)}/export" download title="Download all documents as JSON">⬇ Export</a>` : ''}</div>
       <div class="tabs">
         <button class="${tab === 'docs' ? 'active' : ''}" data-action="colTab" data-tab="docs">Documents</button>
+        <button class="${tab === 'apis' ? 'active' : ''}" data-action="colTab" data-tab="apis">APIs <span class="muted" id="api-count"></span></button>
         <button class="${tab === 'connect' ? 'active' : ''}" data-action="colTab" data-tab="connect">Connect</button>
       </div>
       <div id="col-tab"></div>`;
     const tabEl = docsEl.querySelector('#col-tab');
+    apiServices.then((svcs) => {
+      const n = apisFor(svcs, current.db, current.collection).length;
+      const c = docsEl.querySelector('#api-count');
+      if (c && n) c.textContent = String(n);
+    });
+    if (tab === 'apis') return mountCollectionApis(tabEl, server, current.db, current.collection, canEditDb(current.db), apiServices);
     if (tab === 'connect') return mountConnectGuide(tabEl, server, current.db, current.collection);
     tabEl.innerHTML = `
       <form id="find-form" class="row" style="margin-bottom:10px">
@@ -456,6 +467,10 @@ function renderMongo(el, server) {
       current = { db, collection: col, skip: 0 };
       drawDocsShell();
       loadDocs();
+    },
+    openColApis: ({ db, col }) => {
+      current = { db, collection: col, skip: 0 };
+      drawDocsShell('apis');
     },
     colTab: ({ tab }) => {
       drawDocsShell(tab);

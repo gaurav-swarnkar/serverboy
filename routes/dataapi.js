@@ -15,6 +15,7 @@ const catalog = require('../lib/catalog');
 const { can } = require('../lib/permissions');
 const scope = require('../lib/scope');
 const pm2 = require('../lib/pm2');
+const openapi = require('../lib/openapi');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
@@ -158,6 +159,12 @@ router.use('/mongo/apis/:name', async (req, res, next) => {
   const cfg = await loadConfig(req.params.id, req.params.name);
   // A test request sent as "the public" (no key) can only do what anyone on the internet can.
   const publicTest = req.method === 'POST' && req.path === '/test' && req.body?.auth !== 'console' && req.body?.auth !== 'key';
+  // Swagger "Try it out" goes through /proxy with the caller's own key (or none): it can only do
+  // what that key could do on the internet anyway.
+  if (req.path.startsWith('/proxy/') || req.path === '/openapi.json') {
+    scope.requireDb(req, 'mongo', cfg.database, 'view');
+    return next();
+  }
   scope.requireDb(req, 'mongo', cfg.database, req.method === 'GET' || publicTest ? 'view' : 'edit');
   next();
 });
@@ -575,6 +582,57 @@ router.post('/mongo/apis/:name/test', async (req, res) => {
     /* not JSON */
   }
   res.json({ status: Number(status) || 0, ms: Date.now() - started, body: json ?? text.slice(0, 20000) });
+});
+
+// ---------- Swagger / OpenAPI ----------
+
+router.get('/mongo/apis/:name/openapi.json', async (req, res) => {
+  const name = apiName(req.params.name);
+  const cfg = migrate(await loadConfig(req.params.id, name));
+  const app = JSON.parse((await readRemote(req.params.id, `${dir(name)}/.serverboy-app.json`)) || '{}');
+  const slugs = req.query.api ? String(req.query.api).split(',').filter((x) => cfg.apis[x]) : null;
+  const cols = [...new Set(Object.entries(cfg.apis).filter(([s]) => !slugs || slugs.includes(s)).map(([, a]) => a.collection))];
+  const samples = {};
+  if (cols.length) {
+    const r = await mongosh(
+      req.params.id,
+      `const d = db.getSiblingDB(${JSON.stringify(cfg.database)});
+out(Object.fromEntries(${JSON.stringify(cols)}.map((c) => [c, d.getCollection(c).find().sort({ _id: -1 }).limit(20).toArray()])));`,
+    ).catch(() => ({}));
+    Object.assign(samples, r);
+  }
+  const https = app.domain ? (await ssh.exec(req.params.id, `grep -l 'ssl_certificate' /etc/nginx/sites-enabled/${q(app.domain)} 2>/dev/null`)).stdout.includes('/etc/nginx') : false;
+  // "Try it out" works best through Serverboy (also before publishing); the public address is
+  // what websites and apps use, so a downloaded spec lists that first.
+  const servers = [{ url: `/api/servers/${req.params.id}/mongo/apis/${name}/proxy`, description: 'Through Serverboy (for trying it out here)' }];
+  if (app.domain) servers[req.query.download ? 'unshift' : 'push']({ url: `${https ? 'https' : 'http'}://${app.domain}`, description: 'Public address (what websites and apps use)' });
+  const spec = openapi.build({ info: cfg, slugs, samples, servers });
+  if (req.query.download) res.setHeader('Content-Disposition', `attachment; filename="${slugs?.length === 1 ? slugs[0] : name}-openapi.json"`);
+  res.json(spec);
+});
+
+// Forwards a request to the API on the server (it only listens on 127.0.0.1). Only the
+// caller's own x-api-key is passed on.
+router.all('/mongo/apis/:name/proxy/*rest', async (req, res) => {
+  const name = apiName(req.params.name);
+  const method = req.method.toUpperCase();
+  if (!['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) throw new HttpError(405, 'Method not allowed');
+  const rest = [].concat(req.params.rest || []).join('/');
+  const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+  const reqPath = `/${rest}${qs}`;
+  if (!/^\/(api\/|health)/.test(reqPath) || !/^\/[A-Za-z0-9_.~\-/%?=&+,:@!$'()*[\]{}"]*$/.test(reqPath)) throw new HttpError(400, 'Invalid path');
+  const app = JSON.parse((await readRemote(req.params.id, `${dir(name)}/.serverboy-app.json`)) || '{}');
+  if (!app.port) throw new HttpError(404, 'API not found');
+  const key = String(req.get('x-api-key') || '').trim();
+  if (key && !/^[A-Za-z0-9_-]{8,200}$/.test(key)) throw new HttpError(400, 'Invalid API key format');
+  const body = ['POST', 'PATCH', 'PUT'].includes(method) && req.body && Object.keys(req.body).length ? JSON.stringify(req.body) : '';
+  if (body.length > 200000) throw new HttpError(400, 'Body too large');
+  const r = await ssh.exec(
+    req.params.id,
+    `curl -s -m 20 -X ${method} ${key ? `-H ${q(`x-api-key: ${key}`)}` : ''} ${body ? `-H 'content-type: application/json' --data-binary ${q(body)}` : ''} -w '\n__SB_STATUS__%{http_code}' ${q(`http://127.0.0.1:${app.port}${reqPath}`)}`,
+  );
+  const [text, status] = r.stdout.split('\n__SB_STATUS__');
+  res.status(Number(status) || 502).type('application/json').send(text || JSON.stringify({ error: 'The API did not answer' }));
 });
 
 // Give an existing (private) API a public address later, e.g. once you have a domain.

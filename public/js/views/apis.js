@@ -1,11 +1,13 @@
 // APIs: let websites and apps use MongoDB data over HTTPS, in plain words.
-//   #/s/<id>/apis                         all APIs (and the API servers that run them)
+//   #/s/<id>/apis                         all APIs, by database and collection
+//   #/s/<id>/apis/docs/<server>/<slug|all> Swagger docs
 //   #/s/<id>/apis/new[/<db>/<collection>] make a new API
 //   #/s/<id>/apis/a/<server>/<slug>/<tab> one API: play | setup | code | keys
 //   #/s/<id>/apis/s/<server>/<tab>        one API server: apis | keys | settings
 // An "API server" is the small service (one per database) that answers the requests; most
 // people never need to look at it.
 import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, onAction, loadingHtml, errorHtml, hasAll, can } from '../ui.js';
+import { mountSwagger } from './swagger.js';
 import { OPS, WHO, summary, baseUrl, catalog, inferFields, endpointHtml, modelHtml, docsText, downloadText, details, fetchFor, curlFor } from './api-docs.js';
 
 const SYSTEM_DBS = new Set(['admin', 'local', 'config', 'serverboy']);
@@ -50,6 +52,7 @@ export async function render(el, { server, rest }) {
   if (parts[0] === 'new') return renderNew(el, ctx, { db: parts[1], collection: parts[2] === '-' ? '' : parts[2], service: parts[3] });
   if (parts[0] === 'a' && parts[1] && parts[2]) return renderApi(el, ctx, parts[1], parts[2], parts[3] || 'play');
   if (parts[0] === 's' && parts[1]) return renderService(el, ctx, parts[1], parts[2] || 'apis');
+  if (parts[0] === 'docs') return renderDocs(el, ctx, parts[1], parts[2] || 'all');
   return renderHome(el, ctx);
 }
 
@@ -61,6 +64,8 @@ function makeCtx(server) {
     base,
     home: `#/s/${server.id}/apis`,
     apiUrl: (svc, slug, tab = 'play') => `#/s/${server.id}/apis/a/${encodeURIComponent(svc)}/${encodeURIComponent(slug)}/${tab}`,
+    docsUrl: (svc, slug = 'all') => `#/s/${server.id}/apis/docs/${encodeURIComponent(svc)}/${encodeURIComponent(slug)}`,
+    newUrl: (db, col) => `#/s/${server.id}/apis/new/${encodeURIComponent(db)}/${encodeURIComponent(col || '-')}`,
     svcUrl: (svc, tab = 'apis') => `#/s/${server.id}/apis/s/${encodeURIComponent(svc)}/${tab}`,
     services: () => api(base),
     info: (svc) => api(`${base}/${svc}`),
@@ -116,57 +121,124 @@ function showNewKey(k, writes) {
 
 // ======================= all APIs =======================
 
+// Databases → collections → the APIs that use each collection.
 async function renderHome(el, ctx) {
   el.innerHTML = `
     <div class="page-head">
-      <div><h1>APIs</h1><div class="sub">Let your websites and apps read and change your data over the internet, safely. You decide who may do what.</div></div>
-      <div class="row"><button data-action="docs">⬇ Docs for AI / developers</button><a class="btn btn-primary" href="${ctx.home}/new">+ New API</a></div>
+      <div><h1>APIs</h1><div class="sub">Let your websites and apps read and change your data over the internet, safely. Every collection can have several APIs, each with its own rules.</div></div>
+      <div class="row"><button data-action="swagger">📖 API docs (Swagger)</button><button data-action="docs">⬇ Docs for AI (.txt)</button><a class="btn btn-primary" href="${ctx.home}/new">+ New API</a></div>
     </div>
     <div id="apis-body">${loadingHtml()}</div>`;
   const body = el.querySelector('#apis-body');
   let services = [];
+  let dbs = [];
   try {
-    services = (await ctx.services()).filter((s) => !s.broken);
+    [services, dbs] = await Promise.all([ctx.services(), ctx.databases()]);
+    services = services.filter((s) => !s.broken);
   } catch (err) {
     body.innerHTML = errorHtml(err);
     return;
   }
-  const all = services.flatMap((s) => s.apis.map((a) => ({ ...a, svc: s })));
-  const groups = [...new Set(all.map((a) => a.group || ''))].sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)));
-  const card = (a) => `<a class="card api-card" href="${ctx.apiUrl(a.svc.name, a.slug)}">
-      <div class="row" style="margin-bottom:4px"><b class="grow">${esc(a.title)}</b>${a.svc.status === 'online' ? '' : `<span class="badge bad">${esc(a.svc.status)}</span>`}</div>
-      <div class="mono small muted">/api/${esc(a.slug)}</div>
-      <p class="small" style="margin:8px 0">${esc(summary(a))}</p>
-      <div class="small muted">Data: ${esc(a.svc.database)} → ${esc(a.collection)}</div>
-    </a>`;
+  const colsByDb = Object.fromEntries(await Promise.all(dbs.map(async (d) => [d.name, (await ctx.collections(d.name)).filter((c) => !c.name.startsWith('system.'))])));
+  const canEditDb = (name) => hasAll('databases') || dbs.find((d) => d.name === name)?.access === 'edit';
+  const apiRow = (a, svc) => `<div class="api-row">
+      <div class="grow"><a href="${ctx.apiUrl(svc.name, a.slug)}"><b>${esc(a.title)}</b></a> <span class="mono small muted">/api/${esc(a.slug)}</span>${a.group ? ` <span class="badge">${esc(a.group)}</span>` : ''}
+        <div class="small muted">${esc(summary(a))}</div></div>
+      <div class="row" style="gap:6px"><a class="btn btn-sm" href="${ctx.apiUrl(svc.name, a.slug, 'play')}">▶ Try</a><a class="btn btn-sm" href="${ctx.docsUrl(svc.name, a.slug)}">📖 Docs</a><a class="btn btn-sm" href="${ctx.apiUrl(svc.name, a.slug, 'setup')}">⚙</a></div>
+    </div>`;
   body.innerHTML = `
     ${services.filter((s) => s.needsUpgrade).map(upgradeNotice).join('')}
     ${
-      all.length
-        ? groups.map((g) => `${groups.length > 1 || g ? `<h3 class="api-group-title">${esc(g || 'Other')}</h3>` : ''}<div class="api-cards">${all.filter((a) => (a.group || '') === g).map(card).join('')}</div>`).join('')
-        : `<div class="card api-empty">
-            <h2>No APIs yet</h2>
-            <p>An API is a safe door to one collection of your data. For example, <b>Products</b> at <span class="mono">/api/products</span> could let anyone see your products, while only your admin app (with a key) can add or change them.</p>
-            <p class="muted small">You can make several APIs for the same data, each with its own rules.</p>
-            <a class="btn btn-primary" href="${ctx.home}/new">+ Make my first API</a>
-          </div>`
-    }
-    ${
-      services.length
-        ? `<details class="card api-servers" style="margin-top:16px"><summary><b>API servers</b> <span class="muted small">(technical: the services that answer the requests, one per database)</span></summary>
-        <div class="table-wrap" style="margin-top:10px"><table class="small"><thead><tr><th>Name</th><th>Database</th><th>Status</th><th>Address</th><th>APIs</th><th>Keys</th><th></th></tr></thead><tbody>${services
-          .map(
-            (s) => `<tr><td><b>${esc(s.name)}</b></td><td class="mono">${esc(s.database)}</td><td><span class="badge ${s.status === 'online' ? 'ok' : 'bad'}">${esc(s.status)}</span></td>
-              <td class="mono">${s.domain ? esc(s.domain) : s.port ? 'private (not published)' : '-'}</td><td>${s.apis.length}</td><td>${s.keys}</td>
-              <td class="actions"><a class="btn btn-sm" href="${ctx.svcUrl(s.name, 'settings')}">Manage</a></td></tr>`,
-          )
-          .join('')}</tbody></table></div></details>`
-        : ''
+      dbs.length
+        ? dbs
+            .map((d) => {
+              const svcs = services.filter((s) => s.database === d.name);
+              const cols = colsByDb[d.name] || [];
+              const colNames = [...new Set([...cols.map((c) => c.name), ...svcs.flatMap((s) => s.apis.map((a) => a.collection))])];
+              const withApis = colNames.filter((c) => svcs.some((s) => s.apis.some((a) => a.collection === c)));
+              const without = colNames.filter((c) => !withApis.includes(c));
+              return `<div class="card flush api-db">
+                <div class="card-head"><div><h2 style="margin:0">⛁ ${esc(d.name)}</h2>
+                  <div class="small muted">${svcs.length ? svcs.map((s) => `API server <a href="${ctx.svcUrl(s.name, 'settings')}">${esc(s.name)}</a> <span class="badge ${s.status === 'online' ? 'ok' : 'bad'}">${esc(s.status)}</span> ${s.domain ? `<span class="mono">${esc(s.domain)}</span>` : 'not published yet'}`).join(' · ') : 'No APIs yet'}</div></div>
+                  <div class="row">${svcs.filter((s) => s.apis.length).map((s, _i, all) => `<a class="btn btn-sm" href="${ctx.docsUrl(s.name)}">📖 Docs${all.length > 1 ? ` (${esc(s.name)})` : ''}</a>`).join('')}<a class="btn btn-sm" href="#/s/${ctx.server.id}/databases/mongo">Open in Databases</a></div></div>
+                ${withApis
+                  .map((c) => {
+                    const count = cols.find((x) => x.name === c)?.count;
+                    return `<div class="api-col-block">
+                      <div class="row api-col-head"><b class="mono grow">▤ ${esc(c)}</b>${count != null ? `<span class="small muted">${count} items</span>` : ''}${canEditDb(d.name) ? `<a class="btn btn-sm" href="${ctx.newUrl(d.name, c)}">+ New API for ${esc(c)}</a>` : ''}</div>
+                      ${svcs.flatMap((s) => s.apis.filter((a) => a.collection === c).map((a) => apiRow(a, s))).join('')}
+                    </div>`;
+                  })
+                  .join('')}
+                ${
+                  without.length
+                    ? `<div class="api-col-block muted-block"><div class="small muted" style="margin-bottom:6px">${withApis.length ? 'Collections without an API' : 'Collections (no API yet)'}</div><div class="row" style="gap:6px">${without
+                        .map((c) => (canEditDb(d.name) ? `<a class="btn btn-sm" href="${ctx.newUrl(d.name, c)}" title="Make an API for ${esc(c)}">▤ ${esc(c)} <span class="muted">+ API</span></a>` : `<span class="badge">${esc(c)}</span>`))
+                        .join('')}</div></div>`
+                    : ''
+                }
+              </div>`;
+            })
+            .join('')
+        : `<div class="card api-empty"><h2>No MongoDB database yet</h2><p>Create a database in <a href="#/s/${ctx.server.id}/databases">Databases</a>, then come back to make an API for it.</p></div>`
     }`;
   onAction(el, {
     upgrade: ({ svc }) => upgrade(ctx, svc, () => renderHome(el, ctx)),
     docs: () => docsDialog(ctx, services),
+    swagger: () => {
+      const s = services.find((x) => x.apis.length);
+      if (!s) return toast('Make an API first.', 'error');
+      location.hash = ctx.docsUrl(s.name);
+    },
   });
+}
+
+// ======================= Swagger docs =======================
+
+async function renderDocs(el, ctx, svcName, slug) {
+  el.innerHTML = loadingHtml();
+  let services;
+  try {
+    services = (await ctx.services()).filter((s) => !s.broken && s.apis.length);
+  } catch (err) {
+    el.innerHTML = errorHtml(err);
+    return;
+  }
+  const svc = services.find((s) => s.name === svcName) || services[0];
+  if (!svc) {
+    el.innerHTML = `<div class="small" style="margin-bottom:6px"><a href="${ctx.home}">← All APIs</a></div><div class="card">There are no APIs yet. <a href="${ctx.home}/new">Make one</a>.</div>`;
+    return;
+  }
+  const one = slug !== 'all' && svc.apis.some((a) => a.slug === slug) ? slug : null;
+  const specUrl = `/api${ctx.base}/${svc.name}/openapi.json${one ? `?api=${encodeURIComponent(one)}` : ''}`;
+  el.innerHTML = `
+    <div class="small" style="margin-bottom:6px"><a href="${ctx.home}">← All APIs</a></div>
+    <div class="page-head">
+      <div><h1>API docs</h1><div class="sub">Every API with its addresses, options and fields (OpenAPI / Swagger). Click an action, then <b>Try it out</b>. For actions with a lock, click <b>Authorize</b> and paste an API key.</div></div>
+      <div class="row">
+        ${services.length > 1 ? `<select id="docs-svc">${services.map((s) => `<option value="${esc(s.name)}" ${s.name === svc.name ? 'selected' : ''}>${esc(s.database)} (${esc(s.name)})</option>`).join('')}</select>` : ''}
+        <select id="docs-api"><option value="all">All APIs (${svc.apis.length})</option>${svc.apis.map((a) => `<option value="${esc(a.slug)}" ${a.slug === one ? 'selected' : ''}>${esc(a.title)} · /api/${esc(a.slug)}</option>`).join('')}</select>
+        <a class="btn" href="${specUrl}${one ? '&' : '?'}download=1" download>⬇ openapi.json</a>
+        <button data-action="txt">⬇ .txt for AI</button>
+      </div>
+    </div>
+    <div class="notice small" style="margin-bottom:12px">Try it out runs <b>through Serverboy</b>, so it works even before the API is published, and answers exactly like the internet would (keys and rules apply). Websites and apps use the public address; pick it under <b>Servers</b> to test that too. The downloaded openapi.json lists the public address first.</div>
+    <div class="swagger-wrap" id="swagger">${loadingHtml('Loading the docs…')}</div>`;
+  const go = (s, a) => (location.hash = ctx.docsUrl(s, a));
+  el.querySelector('#docs-svc')?.addEventListener('change', (e) => go(e.target.value, 'all'));
+  el.querySelector('#docs-api').addEventListener('change', (e) => go(svc.name, e.target.value));
+  onAction(el, {
+    txt: async () => {
+      const info = await ctx.info(svc.name);
+      const slugs = one ? [one] : Object.keys(info.apis);
+      downloadText(`${one || svc.name}-api.txt`, await textFor(ctx, info, slugs));
+    },
+  });
+  try {
+    await mountSwagger(el.querySelector('#swagger'), specUrl);
+  } catch (err) {
+    el.querySelector('#swagger').innerHTML = errorHtml(err);
+  }
 }
 
 // Choose APIs (from any API server) and download their reference as plain text.
@@ -427,7 +499,7 @@ async function renderApi(el, ctx, svcName, slug, tab) {
     <div class="page-head">
       <div>
         <h1>${esc(a.title)}</h1>
-        <div class="sub"><span class="mono">${esc(url)}</span> <button class="btn-sm btn-ghost" data-action="copyUrl" title="Copy the address">⧉ Copy</button></div>
+        <div class="sub"><span class="mono">${esc(url)}</span> <button class="btn-sm btn-ghost" data-action="copyUrl" title="Copy the address">⧉ Copy</button> <a class="btn btn-sm" href="${ctx.docsUrl(svcName, slug)}">📖 Swagger docs</a></div>
         <div class="sub small">Data: ${esc(info.database)} → ${esc(a.collection)}${a.group ? ` · Folder: ${esc(a.group)}` : ''} · <a href="${ctx.svcUrl(svcName, 'settings')}">API server ${esc(svcName)}</a></div>
       </div>
     </div>
@@ -973,7 +1045,7 @@ async function renderApi(el, ctx, svcName, slug, tab) {
     bodyEl.innerHTML = `
       <div class="card">
         <div class="row"><h3 class="grow" style="margin:0">Docs for AI and developers</h3>
-          <button data-action="copyDocs">Copy text</button><button data-action="previewDocs">Preview</button><button class="btn-primary" data-action="downloadDocs">⬇ Download .txt</button></div>
+          <a class="btn" href="${ctx.docsUrl(svcName, slug)}">📖 Swagger docs</a><button data-action="copyDocs">Copy text</button><button data-action="previewDocs">Preview</button><button class="btn-primary" data-action="downloadDocs">⬇ Download .txt</button></div>
         <p class="small muted" style="margin-bottom:0">Everything about this API as plain text: address, what it allows, the fields and examples. Paste it into ChatGPT / Claude ("build me a page that shows these items"), a README or a message to a developer.</p>
       </div>
       ${

@@ -98,7 +98,7 @@ Each app lives in `/var/www/<name>`, owned by your SSH user, with its settings i
 
 ## APIs (MongoDB data over HTTPS)
 
-Hosting → **APIs**. An API is a named, safe door to one MongoDB collection, at `https://<api-server>/api/<name>`. Make as many as you like, also several for the same collection with different rules, e.g. **Products** (anyone can see) and **Products admin** (apps with a key can add, change and delete).
+Hosting → **APIs** lists every database, its collections and the APIs of each collection (Try · Docs · settings, and **+ New API for <collection>**). In **Databases → MongoDB**, each collection shows how many APIs use it and has an **APIs** tab with the same links. An API is a named, safe door to one MongoDB collection, at `https://<api-server>/api/<name>`. Make as many as you like, also several for the same collection with different rules, e.g. **Products** (anyone can see) and **Products admin** (apps with a key can add, change and delete).
 
 - **+ New API** asks three things: which data (database and collection, or a new one), what it is for (*Show it on a website*, *Website + my admin app*, *Private, for my own app*, *A form*, or *I'll choose myself*) and its name and address. The first API of a database also sets up that database's **API server** (a small Node.js service in `/var/www/<name>`, run by PM2, with its own MongoDB user limited to that database), optionally on a domain with HTTPS.
 - **Playground:** a live table of the items with **+ Add item**, **View**, **Edit** and **Delete**. Switch **Try as** between *Anyone on the internet* and *An app with a key*. Every answer is explained in plain words, with the request, the answer and the same request as `curl`. An *Advanced* box sends any request.
@@ -108,6 +108,7 @@ Hosting → **APIs**. An API is a named, safe door to one MongoDB collection, at
   - *Fields*: show or hide each field, whether callers may fill it in, required when adding, or *always set to* a value. Tick *ignore unticked fields* for public forms.
   - *Order and page size*, and the name, address, folder and description.
 - **Code & docs:** copy-paste JavaScript and `curl` for each allowed action, a ready web page that lists the items, the full reference, and **⬇ Download .txt** / Copy: a plain-text reference to paste into an AI assistant, a README or a message. The APIs page has **⬇ Docs for AI / developers** to download several APIs at once.
+- **API docs (Swagger):** an OpenAPI 3 description of every API (actions, link values, fields from your data, which actions need a key), shown with Swagger UI. **Try it out** runs through Serverboy, so it works before the API is published, with exactly the same rules; click **Authorize** to send a key. **⬇ openapi.json** imports into Postman, Insomnia or code generators.
 - **Keys:** a key can be limited to one API (see, add, change, delete) or cover every API of its API server. Keys are stored only as hashes and shown once; apps send them in `x-api-key`.
 - **API server** (APIs page → *API servers* → Manage): its address (publish on a domain), allowed websites (CORS), rate limit, maximum page size, engine update, logs, delete.
 

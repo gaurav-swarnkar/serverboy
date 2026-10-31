@@ -1,6 +1,51 @@
-// "Connect" tab of a MongoDB collection: how to use the database from code and web pages.
-// (APIs are managed on their own page: Hosting → APIs.)
-import { esc } from '../ui.js';
+// "APIs" and "Connect" tabs of a MongoDB collection: the APIs that use it (managed under
+// Hosting → APIs) and how to use the database from code and web pages.
+import { api, esc, loadingHtml, errorHtml } from '../ui.js';
+import { summary } from './api-docs.js';
+
+// The API servers (and their APIs) of a server, loaded once per Databases page.
+export function loadApiServices(server) {
+  return api(`/servers/${server.id}/mongo/apis`).catch(() => []);
+}
+
+export function apisFor(services, db, col) {
+  return services.filter((s) => !s.broken && s.database === db).flatMap((s) => s.apis.filter((a) => a.collection === col).map((a) => ({ ...a, svc: s })));
+}
+
+// ======================= APIs tab =======================
+
+export async function mountCollectionApis(el, server, db, col, canEdit, servicesPromise) {
+  el.innerHTML = loadingHtml();
+  const page = (svc, slug, tab = 'play') => `#/s/${server.id}/apis/a/${encodeURIComponent(svc)}/${encodeURIComponent(slug)}/${tab}`;
+  const docs = (svc, slug) => `#/s/${server.id}/apis/docs/${encodeURIComponent(svc)}/${encodeURIComponent(slug)}`;
+  const newUrl = `#/s/${server.id}/apis/new/${encodeURIComponent(db)}/${encodeURIComponent(col)}`;
+  try {
+    const services = await servicesPromise;
+    const list = apisFor(services, db, col);
+    const upgrade = services.find((s) => s.database === db && s.needsUpgrade);
+    el.innerHTML = `
+      ${upgrade ? `<div class="notice warn" style="margin-bottom:10px">The API server ${esc(upgrade.name)} needs an engine update. <a href="#/s/${server.id}/apis">Open APIs</a> and click "Update engine".</div>` : ''}
+      <div class="card flush">
+        <div class="card-head"><h3 style="margin:0">APIs for ${esc(col)}</h3>${canEdit ? `<a class="btn btn-sm btn-primary" href="${newUrl}">+ New API for ${esc(col)}</a>` : ''}</div>
+        ${
+          list.length
+            ? list
+                .map(
+                  (a) => `<div class="api-row">
+                  <div class="grow"><a href="${page(a.svc.name, a.slug)}"><b>${esc(a.title)}</b></a> <span class="mono small muted">${esc(a.svc.domain ? `https://${a.svc.domain}` : '')}/api/${esc(a.slug)}</span>
+                    <div class="small muted">${esc(summary(a))}</div></div>
+                  <div class="row" style="gap:6px"><a class="btn btn-sm" href="${page(a.svc.name, a.slug, 'play')}">▶ Try</a><a class="btn btn-sm" href="${docs(a.svc.name, a.slug)}">📖 Docs</a>${canEdit ? `<a class="btn btn-sm" href="${page(a.svc.name, a.slug, 'setup')}">⚙ Settings</a>` : ''}</div>
+                </div>`,
+                )
+                .join('')
+            : `<div class="empty">No API uses ${esc(col)} yet.${canEdit ? ` <a href="${newUrl}">Make one</a> to let websites and apps use this data.` : ''}</div>`
+        }
+      </div>
+      <p class="small muted">A collection can have several APIs with different rules, e.g. one that anyone can read and one for your admin app with a key. All APIs and their Swagger docs: <a href="#/s/${server.id}/apis">Hosting → APIs</a>.</p>`;
+  } catch (err) {
+    el.innerHTML = errorHtml(err);
+  }
+}
 
 // ======================= Connect tab =======================
 

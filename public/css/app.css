@@ -369,3 +369,14 @@ details > summary { cursor: pointer; margin: 10px 0 6px; }
 .st-summary { margin-bottom: 16px; }
 #st-body > .card { margin-bottom: 16px; }
 tr.st-unused { background: var(--warn-soft); }
+.api-db { margin-bottom: 16px; }
+.api-col-block { padding: 10px 16px; border-top: 1px solid var(--border); }
+.api-col-head { margin-bottom: 6px; }
+.api-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; margin: 4px 0 0 14px; border-left: 3px solid var(--accent); background: var(--panel-2); border-radius: 0 8px 8px 0; }
+.card > .api-row { margin: 8px 16px; }
+.api-row .grow { min-width: 220px; }
+.api-row a { text-decoration: none; }
+[data-action=openColApis] { cursor: pointer; margin-right: 6px; }
+.swagger-wrap { background: #fff; color: #222; border-radius: 10px; border: 1px solid var(--border); padding: 4px 8px 16px; min-height: 200px; }
+.swagger-wrap .swagger-ui .info { margin: 20px 0; }
+.swagger-wrap .swagger-ui .scheme-container { box-shadow: none; padding: 12px 0; }
