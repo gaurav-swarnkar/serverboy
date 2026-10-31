@@ -246,14 +246,16 @@ function renderShell(current) {
         <a class="icon-btn" href="${user.isOwner ? '#/admin/settings' : '#/account'}" title="Settings">${icon('settings', 20)}</a>
         <a class="icon-btn" href="https://github.com/gaurav-swarnkar/serverboy#readme" target="_blank" rel="noopener" title="Help">${icon('help', 20)}</a>
         <a class="icon-btn topbar-bell" href="#/messages" title="Messages">${icon('mail', 20)}<span id="msg-count" class="bell-count hidden"></span></a>
-        <div class="usermenu">
-          <button id="user-btn" class="user-btn" aria-haspopup="true">${avatarOf(user, 38)}</button>
-          <div class="menu hidden">
-            <div class="menu-head"><b>${esc(user.name || user.username)}</b><br>${esc(user.role)}</div>
+        <div class="usermenu account-menu">
+          <button id="user-btn" class="user-btn" aria-haspopup="true" aria-expanded="false" title="Your account">${avatarOf(user, 38)}</button>
+          <div class="menu hidden" id="user-menu">
+            <div class="menu-head menu-user">${avatarOf(user, 36)}<span><b>${esc(user.name || user.username)}</b><br>${esc(user.role)}${user.email ? ` · ${esc(user.email)}` : ''}</span></div>
+            <hr>
             <a href="#/people/me">${icon('user', 16)} My profile</a>
-            <a href="#/account">${icon('key', 16)} Password & login</a>
+            <a href="#/account">${icon('key', 16)} My account & password</a>
             <a href="#/messages">${icon('mail', 16)} Messages</a>
-            ${user.isOwner ? `<a href="#/admin/users">${icon('settings', 16)} Administration</a>` : ''}
+            <a href="#/people">${icon('users', 16)} Team</a>
+            ${user.isOwner ? `<a href="#/admin/users">${icon('shield', 16)} Administration</a><a href="#/admin/settings">${icon('settings', 16)} Settings</a>` : ''}
             <a href="#/servers">${icon('grid', 16)} All servers</a>
             <hr>
             <a href="#" id="logout">${icon('logout', 16)} Log out</a>
@@ -269,13 +271,20 @@ function renderShell(current) {
   app.querySelector('.sidebar').addEventListener('click', (e) => {
     if (e.target.closest('a')) layout.classList.remove('menu-open');
   });
-  const menu = app.querySelector('.usermenu .menu');
-  app.querySelector('#user-btn').addEventListener('click', () => menu.classList.toggle('hidden'));
+  const themeList = app.querySelector('#theme-list');
+  const menu = app.querySelector('#user-menu');
+  const userBtn = app.querySelector('#user-btn');
+  userBtn.addEventListener('click', () => {
+    themeList.classList.add('hidden');
+    userBtn.setAttribute('aria-expanded', String(menu.classList.toggle('hidden') === false));
+  });
   menu.addEventListener('click', (e) => {
     if (e.target.closest('a')) menu.classList.add('hidden');
   });
-  const themeList = app.querySelector('#theme-list');
-  app.querySelector('#theme-btn').addEventListener('click', () => themeList.classList.toggle('hidden'));
+  app.querySelector('#theme-btn').addEventListener('click', () => {
+    menu.classList.add('hidden');
+    themeList.classList.toggle('hidden');
+  });
   themeList.addEventListener('click', (e) => {
     const pick = e.target.closest('[data-theme-pick]');
     if (!pick) return;
@@ -358,6 +367,7 @@ function syncPageHead() {
 new MutationObserver(() => syncPageHead()).observe(document.getElementById('app'), { childList: true, subtree: true });
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.querySelectorAll('.usermenu .menu, .side-switch .menu').forEach((m) => m.classList.add('hidden'));
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
     const input = document.getElementById('top-search');
     if (input) {

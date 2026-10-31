@@ -619,3 +619,7 @@ td.actions > button, td.actions > .btn, td.actions > .badge { margin: 2px 0 2px 
 .hc-tile { display: flex; flex-direction: column; gap: 2px; }
 .hc-tile .row b { font-weight: 600; }
 .theme-menu .menu { min-width: 220px; }
+.account-menu .menu { min-width: 250px; }
+.menu .menu-user { display: flex; align-items: center; gap: 10px; }
+.menu .menu-user .avatar { flex: none; }
+.menu #logout { color: var(--bad); }
