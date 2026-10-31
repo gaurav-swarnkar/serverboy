@@ -26,6 +26,20 @@ export async function render(el, { server }) {
   const statsEl = el.querySelector('#stats');
   let timer = null;
   let stopped = false;
+  // Once per visit: how much can be freed and what looks unused (Disk & cleanup page).
+  let diskHint = '';
+  if (can('system')) {
+    api(`${base}/storage`)
+      .then((r) => {
+        const free = r.cleanups.filter((c) => !['pm2-logs', 'docker'].includes(c.id)).reduce((t, c) => t + c.bytes, 0);
+        const unused = r.apps.filter((a) => a.state === 'unused');
+        const bits = [free > 50 * 1024 * 1024 ? `about <b>${fmtBytes(free)}</b> can be freed safely` : '', unused.length ? `<b>${unused.length}</b> installed app(s) look unused (${unused.map((a) => esc(a.name)).join(', ')})` : ''].filter(Boolean);
+        diskHint = `${bits.length ? `${bits.join(' · ')} · ` : 'Nothing to clean up. '}<a href="#/s/${server.id}/storage">Disk & cleanup →</a>`;
+        const h = el.querySelector('#disk-hint');
+        if (h) h.innerHTML = diskHint;
+      })
+      .catch(() => {});
+  }
 
   async function load() {
     try {
@@ -56,6 +70,7 @@ export async function render(el, { server }) {
             <table><tbody>
               ${s.disks.map((d) => `<tr><td class="mono">${esc(d.mount)}</td><td style="width:45%">${bar(pct(d.used, d.size))}</td><td class="small muted">${fmtBytes(d.used)} / ${fmtBytes(d.size)}</td></tr>`).join('')}
             </tbody></table>
+            ${can('system') ? `<div id="disk-hint" class="small" style="margin-top:8px">${diskHint || '<a href="#/s/' + server.id + '/storage">What is using the space? →</a>'}</div>` : ''}
           </div>
           <div class="card flush">
             <div class="card-head"><h2>Top processes</h2><span class="small muted">refreshes every 5s</span></div>

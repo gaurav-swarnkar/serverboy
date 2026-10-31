@@ -364,3 +364,8 @@ details > summary { cursor: pointer; margin: 10px 0 6px; }
   .who tr { display: flex; flex-direction: column; }
   .new-api .step { flex-direction: column; }
 }
+
+/* ---------- disk & cleanup ---------- */
+.st-summary { margin-bottom: 16px; }
+#st-body > .card { margin-bottom: 16px; }
+tr.st-unused { background: var(--warn-soft); }

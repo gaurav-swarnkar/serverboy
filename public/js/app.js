@@ -19,6 +19,7 @@ const views = {
   files: () => import('./views/files.js'),
   services: () => import('./views/services.js'),
   apps: () => import('./views/apps.js'),
+  storage: () => import('./views/storage.js'),
   databases: () => import('./views/databases.js'),
   apis: () => import('./views/apis.js'),
   sites: () => import('./views/sites.js'),
@@ -39,6 +40,7 @@ const VIEW_PERMISSION = {
   terminal: 'terminal',
   files: 'files',
   apps: 'system',
+  storage: 'system',
   services: 'services',
   sites: 'sites',
   nodeapps: 'nodeapps',
@@ -50,7 +52,7 @@ const VIEW_PERMISSION = {
 
 const SERVER_NAV = [
   ['Overview', [['dashboard', '◉', 'Dashboard'], ['terminal', '›_', 'Terminal'], ['files', '▤', 'File Manager']]],
-  ['Software', [['apps', '⬇', 'App Store'], ['services', '⚙', 'Services']]],
+  ['Software', [['apps', '⬇', 'App Store'], ['services', '⚙', 'Services'], ['storage', '◔', 'Disk & cleanup']]],
   ['Hosting', [['sites', '◎', 'Websites'], ['nodeapps', '⬢', 'Node Apps'], ['databases', '⛁', 'Databases'], ['apis', '⇄', 'APIs']]],
   ['Security', [['firewall', '⛨', 'Firewall'], ['jobs', '☰', 'Tasks']]],
 ];
