@@ -1,23 +1,45 @@
 import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, fmtBytes, onAction, loadingHtml, errorHtml, randomPassword, can, hasAll } from '../ui.js';
 import { mountApiSummary, mountConnectGuide, apiPageUrl } from './data-api.js';
+import { docForm } from './doc-form.js';
+
+// Only engines installed on the server are shown (most people use just one).
+const ENGINES = { mongo: 'MongoDB', mysql: 'MariaDB / MySQL' };
 
 export async function render(el, { server, rest }) {
-  const tab = rest[0] === 'mongo' ? 'mongo' : 'mysql';
   el.innerHTML = `
     <div class="page-head">
       <div><h1>Databases</h1><div class="sub">Create databases and users, browse data and run queries, like phpMyAdmin.</div></div>
     </div>
-    <div class="tabs">
-      <button class="${tab === 'mysql' ? 'active' : ''}" data-action="tab" data-tab="mysql">MariaDB / MySQL</button>
-      <button class="${tab === 'mongo' ? 'active' : ''}" data-action="tab" data-tab="mongo">MongoDB</button>
-    </div>
-    <div id="db-view"></div>`;
-  onAction(el.querySelector('.tabs'), {
-    tab: ({ tab: t }) => {
-      location.hash = `#/s/${server.id}/databases/${t}`;
-    },
-  });
+    <div id="db-tabs"></div>
+    <div id="db-view">${loadingHtml()}</div>`;
+  const [mongo, mysql] = await Promise.all([
+    api(`/servers/${server.id}/mongo/status`).catch(() => ({ installed: false })),
+    api(`/servers/${server.id}/mysql/status`).catch(() => ({ installed: false })),
+  ]);
+  const installed = [mongo.installed && 'mongo', mysql.installed && 'mysql'].filter(Boolean);
   const view = el.querySelector('#db-view');
+  if (!installed.length) {
+    view.innerHTML = `<div class="card" style="max-width:640px">
+      <h2 style="margin-top:0">No database is installed yet</h2>
+      <p class="muted">Install MongoDB (for Node.js / SaaS apps) or MariaDB (for PHP sites like WordPress) first.</p>
+      ${can('system') ? `<a class="btn btn-primary" href="#/s/${server.id}/apps">Open the App Store</a>` : '<p class="small muted">Ask the owner to install one from the App Store.</p>'}
+    </div>`;
+    return;
+  }
+  const tab = installed.includes(rest[0]) ? rest[0] : installed[0];
+  if (installed.length > 1) {
+    el.querySelector('#db-tabs').innerHTML = `<div class="tabs">${installed
+      .map((t) => `<button class="${tab === t ? 'active' : ''}" data-action="tab" data-tab="${t}">${ENGINES[t]}</button>`)
+      .join('')}</div>`;
+    onAction(el.querySelector('#db-tabs'), {
+      tab: ({ tab: t }) => {
+        location.hash = `#/s/${server.id}/databases/${t}`;
+      },
+    });
+  } else {
+    el.querySelector('.page-head h1').textContent = `Databases · ${ENGINES[tab]}`;
+  }
+  view.innerHTML = '';
   if (tab === 'mongo') return renderMongo(view, server);
   return renderMysql(view, server);
 }
@@ -292,7 +314,7 @@ function renderMongo(el, server) {
       const cols = await api(`${base}/databases/${encodeURIComponent(db)}/collections`);
       box.innerHTML = `${cols
         .map((c) => `<div class="row" style="padding:4px 12px 4px 32px"><span class="file-name grow" data-action="openCol" data-db="${esc(db)}" data-col="${esc(c.name)}">▤ ${esc(c.name)}</span><span class="small muted">${c.count ?? ''}</span></div>`)
-        .join('')}${canEditDb(db) ? `<div style="padding:4px 12px 8px 32px"><button class="btn-sm" data-action="newCol" data-db="${esc(db)}">+ Collection</button></div>` : ''}`;
+        .join('')}${canEditDb(db) ? `<div class="row" style="padding:4px 12px 8px 32px;gap:6px"><button class="btn-sm" data-action="newCol" data-db="${esc(db)}">+ Collection</button><button class="btn-sm" data-action="importCol" data-db="${esc(db)}" title="Import a collection from a JSON or CSV file">⬆ Import</button></div>` : ''}`;
     } catch (err) {
       box.innerHTML = errorHtml(err);
     }
@@ -305,6 +327,8 @@ function renderMongo(el, server) {
         ${tab === 'docs' && canEditDb(current.db) ? `<button class="btn-sm" data-action="insert">+ Insert document</button>
         <button class="btn-sm btn-danger" data-action="dropCol">Drop collection</button>` : ''}
         ${canEditDb(current.db) ? '' : '<span class="badge">view only</span>'}
+        ${tab === 'docs' && canEditDb(current.db) ? '<button class="btn-sm" data-action="importCol" title="Add documents from a JSON or CSV file">⬆ Import</button>' : ''}
+        ${tab === 'docs' ? `<a class="btn btn-sm" href="/api${base}/databases/${encodeURIComponent(current.db)}/collections/${encodeURIComponent(current.collection)}/export" download title="Download all documents as JSON">⬇ Export</a>` : ''}
         <a class="btn btn-sm" href="${apiPageUrl(server, current.db, current.collection)}" target="_blank" rel="noopener" title="Open this collection's API in a new browser tab">API ↗</a></div>
       <div class="tabs">
         <button class="${tab === 'docs' ? 'active' : ''}" data-action="colTab" data-tab="docs">Documents</button>
@@ -355,14 +379,81 @@ function renderMongo(el, server) {
     }
   }
 
-  function docEditor(title, value, onSave) {
-    const body = document.createElement('div');
-    body.innerHTML = '<textarea spellcheck="false" style="width:100%;height:50vh"></textarea><p class="small muted">JSON / Extended JSON, e.g. {"$oid": "…"} for ObjectIds or {"$date": "2025-01-01T00:00:00Z"} for dates.</p>';
-    body.querySelector('textarea').value = value;
-    modal({ title, wide: true, body, actions: [{ label: 'Cancel' }, { label: 'Save', className: 'btn-primary', onClick: () => onSave(body.querySelector('textarea').value) }] });
+  // Import a collection from a file: choose and check the file, see a preview, then import.
+  function importDialog(db, col) {
+    const box = document.createElement('div');
+    let prepared = null;
+    box.innerHTML = `
+      <label class="field"><span>File</span><input type="file" name="file" accept=".json,.ndjson,.jsonl,.csv,.tsv,application/json,text/csv">
+        <small>JSON array <span class="mono">[ {...}, {...} ]</span>, one JSON document per line (what <span class="mono">mongoexport</span> and Export make), or CSV / TSV with a header row. Up to 200 MB.</small></label>
+      <label class="check"><input type="checkbox" name="types" checked> CSV: turn numbers and true / false into numbers and booleans</label>
+      <div id="imp-preview"></div>`;
+    const fileInput = box.querySelector('input[type=file]');
+    const preview = box.querySelector('#imp-preview');
+    async function check() {
+      const f = fileInput.files[0];
+      if (!f) return;
+      prepared = null;
+      preview.innerHTML = loadingHtml('Reading the file…');
+      const form = new FormData();
+      form.append('types', box.querySelector('[name=types]').checked ? 'true' : 'false');
+      form.append('file', f, f.name);
+      try {
+        prepared = await api(`${base}/databases/${encodeURIComponent(db)}/import/prepare`, { method: 'POST', form });
+      } catch (err) {
+        preview.innerHTML = `<div class="notice warn">${esc(err.message)}</div>`;
+        return;
+      }
+      const guess = col || f.name.replace(/\.(json|ndjson|jsonl|csv|tsv)$/i, '').replace(/[^A-Za-z0-9_.-]+/g, '_').slice(0, 60) || 'imported';
+      const existing = (name) => prepared.collections.find((c) => c.name === name);
+      preview.innerHTML = `
+        <div class="notice" style="margin:10px 0"><b>${prepared.count.toLocaleString()} document(s)</b> found (${esc({ 'json-array': 'JSON array', ndjson: 'JSON, one per line', csv: 'CSV', tsv: 'TSV' }[prepared.format] || prepared.format)}).
+          Fields: ${prepared.fields.map((x) => `<span class="mono">${esc(x)}</span>`).join(', ')}</div>
+        <details><summary class="small">First ${prepared.sample.length} document(s)</summary><pre class="log" style="max-height:200px">${esc(JSON.stringify(prepared.sample, null, 2))}</pre></details>
+        <div class="form-grid" style="margin-top:10px">
+          <label class="field"><span>Into collection</span><input name="collection" class="mono" value="${esc(guess)}" list="imp-cols"><datalist id="imp-cols">${prepared.collections.map((c) => `<option value="${esc(c.name)}">`).join('')}</datalist><small id="imp-state"></small></label>
+          <label class="field"><span>If it already has documents</span><select name="mode"><option value="append">Add these documents</option><option value="replace">Delete its documents first, then import</option></select></label>
+        </div>`;
+      const nameInput = preview.querySelector('[name=collection]');
+      const state = () => {
+        const e = existing(nameInput.value.trim());
+        preview.querySelector('#imp-state').textContent = e ? `Exists in ${db} with ${e.count} document(s).` : `New collection in ${db}.`;
+      };
+      nameInput.addEventListener('input', state);
+      state();
+    }
+    fileInput.addEventListener('change', check);
+    box.querySelector('[name=types]').addEventListener('change', check);
+    modal({
+      title: `Import into ${db}`,
+      wide: true,
+      body: box,
+      actions: [
+        { label: 'Cancel' },
+        {
+          label: 'Import',
+          className: 'btn-primary',
+          onClick: async () => {
+            if (!prepared) throw new Error('Choose a file first');
+            const target = box.querySelector('[name=collection]').value.trim();
+            const mode = box.querySelector('[name=mode]').value;
+            const e = prepared.collections.find((c) => c.name === target);
+            if (mode === 'replace' && e?.count && !(await confirmDialog(`Delete all ${e.count} document(s) in ${db}.${target} and import ${prepared.count} new one(s)?`, { danger: true, confirmLabel: 'Replace' }))) return false;
+            const r = await api(`${base}/databases/${encodeURIComponent(db)}/import`, { method: 'POST', body: { token: prepared.token, collection: target, mode } });
+            toast(`Imported ${r.inserted} document(s) into ${target}${r.failed ? `; ${r.failed} skipped: ${r.errors[0] || ''}` : ''}.`, r.failed ? 'error' : 'ok', 9000);
+            await loadTree();
+            await openDb(db, true);
+            current = { db, collection: target, skip: 0 };
+            drawDocsShell();
+            loadDocs();
+          },
+        },
+      ],
+    });
   }
 
   onAction(el, {
+    importCol: ({ db }) => importDialog(db || current.db, db ? null : current.collection),
     openDb: ({ db }) => openDb(db),
     openCol: ({ db, col }) => {
       current = { db, collection: col, skip: 0 };
@@ -414,17 +505,25 @@ function renderMongo(el, server) {
       loadTree();
     },
     insert: () =>
-      docEditor('Insert document', '{\n  \n}', async (text) => {
-        await api(`${base}/insert`, { method: 'POST', body: { db: current.db, collection: current.collection, document: text } });
-        toast('Inserted', 'ok');
-        loadDocs();
+      docForm({
+        title: `Insert into ${current.db}.${current.collection}`,
+        samples: current.docs,
+        onSave: async (text) => {
+          await api(`${base}/insert`, { method: 'POST', body: { db: current.db, collection: current.collection, document: text } });
+          toast('Inserted', 'ok');
+          loadDocs();
+        },
       }),
     editDoc: ({ i }) =>
       // Documents arrive as relaxed Extended JSON ({"$oid": …}), which the server parses back with EJSON.
-      docEditor('Edit document', JSON.stringify(current.docs[i], null, 2), async (text) => {
-        await api(`${base}/update`, { method: 'POST', body: { db: current.db, collection: current.collection, document: text } });
-        toast('Saved', 'ok');
-        loadDocs();
+      docForm({
+        title: 'Edit document',
+        doc: current.docs[i],
+        onSave: async (text) => {
+          await api(`${base}/update`, { method: 'POST', body: { db: current.db, collection: current.collection, document: text } });
+          toast('Saved', 'ok');
+          loadDocs();
+        },
       }),
     deleteDoc: async ({ i }) => {
       const doc = current.docs[i];

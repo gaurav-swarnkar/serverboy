@@ -13,6 +13,28 @@ router.use('/team', auth.requirePermission(OWNER));
 
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
+// A message from the owner, shown to everyone as a banner until they dismiss it.
+router.post('/team/announcement', (req, res) => {
+  const text = String(req.body?.text || '').trim().slice(0, 1000);
+  if (!text) {
+    store.setAnnouncement(null);
+    team.audit({ user: req.user.username, ip: req.ip, action: 'Removed the team message' });
+    return res.json({ announcement: null });
+  }
+  const announcement = {
+    id: crypto.randomBytes(6).toString('hex'),
+    text,
+    level: ['info', 'warn'].includes(req.body?.level) ? req.body.level : 'info',
+    askRefresh: Boolean(req.body?.askRefresh),
+    audience: req.body?.audience === 'everyone' ? 'everyone' : 'outdated',
+    by: req.user.name || req.user.username,
+    at: new Date().toISOString(),
+  };
+  store.setAnnouncement(announcement);
+  team.audit({ user: req.user.username, ip: req.ip, action: `Sent a team message: ${text.slice(0, 80)}` });
+  res.json({ announcement });
+});
+
 router.get('/team', async (req, res) => {
   res.json({ status: await team.status(), permissions: PERMISSIONS, presets: PRESETS, auditDays: team.AUDIT_DAYS });
 });

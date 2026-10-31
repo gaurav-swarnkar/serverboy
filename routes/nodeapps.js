@@ -3,6 +3,7 @@
 // server in .serverboy-app.json so redeploys work from any Serverboy install.
 const express = require('express');
 const ssh = require('../lib/ssh');
+const pm2 = require('../lib/pm2');
 const jobs = require('../lib/jobs');
 const nginx = require('../lib/nginx');
 
@@ -123,7 +124,7 @@ git log -1 --format='Deployed commit %h: %s (%an, %ar)'`,
       const vars = parseEnv(env);
       if (cfg.port && !vars.PORT) vars.PORT = String(cfg.port);
       if (!vars.NODE_ENV) vars.NODE_ENV = 'production';
-      const pm2 = {
+      const pm2File = {
         apps: [
           {
             name: cfg.name,
@@ -138,7 +139,7 @@ git log -1 --format='Deployed commit %h: %s (%an, %ar)'`,
           },
         ],
       };
-      await ssh.writeFile(serverId, `${dir}/${PM2_FILE}`, JSON.stringify(pm2, null, 2), { sudo: false });
+      await ssh.writeFile(serverId, `${dir}/${PM2_FILE}`, JSON.stringify(pm2File, null, 2), { sudo: false });
       await ssh.writeFile(serverId, `${dir}/${APP_FILE}`, JSON.stringify(cfg, null, 2), { sudo: false });
       // .env and the PM2 file hold secrets (database passwords, keys): owner-only.
       await ssh.exec(serverId, `touch ${q(`${dir}/.env`)} && chmod 600 ${q(`${dir}/.env`)} ${q(`${dir}/${PM2_FILE}`)}`, { check: true });
@@ -154,27 +155,15 @@ git log -1 --format='Deployed commit %h: %s (%an, %ar)'`,
   if (cfg.buildCmd) steps.push({ label: `Building: ${cfg.buildCmd}`, cmd: `cd ${q(dir)} && ${cfg.buildCmd}` });
 
   steps.push({
+    label: fresh ? 'Making PM2 start on boot' : 'Checking PM2',
+    fn: async (log) => log(`${await pm2.ensureDaemon(serverId, { setupBoot: fresh })}\n`),
+  });
+
+  steps.push({
     label: 'Starting with PM2',
     cmd: `cd ${q(dir)} && pm2 delete ${q(cfg.name)} >/dev/null 2>&1; pm2 start ${PM2_FILE} && pm2 save
 sleep 3; pm2 describe ${q(cfg.name)} | grep -E 'status|restarts' | head -3`,
   });
-
-  if (fresh) {
-    steps.push({
-      label: 'Making PM2 start on boot',
-      allowFail: true,
-      fn: async (log) => {
-        const entry = await ssh.connect(serverId);
-        const user = entry.server.username;
-        const r = await ssh.exec(
-          serverId,
-          `PM2=$(command -v pm2); HOME_DIR=$(getent passwd ${q(user)} | cut -d: -f6); env PATH="$PATH:/usr/bin:/usr/local/bin" "$PM2" startup systemd -u ${q(user)} --hp "$HOME_DIR" | tail -2`,
-          { sudo: true },
-        );
-        log(r.stdout + r.stderr);
-      },
-    });
-  }
 
   return steps;
 }
@@ -183,7 +172,7 @@ router.get('/node-apps', async (req, res) => {
   const r = await ssh.exec(
     req.params.id,
     `command -v pm2 >/dev/null || { echo NO_PM2; exit 0; }
-pm2 jlist 2>/dev/null | tail -1
+${pm2.whenRunning('pm2 jlist 2>/dev/null | tail -1')}
 echo "##configs"
 for f in /var/www/*/${APP_FILE}; do [ -f "$f" ] && { cat "$f"; echo; echo "##sep"; }; done`,
   );
@@ -263,9 +252,12 @@ router.post('/node-apps/:name/:action', async (req, res) => {
   const name = appName(req.params.name);
   const { action } = req.params;
   if (!['restart', 'stop', 'start', 'delete'].includes(action)) throw new HttpError(400, 'Invalid action');
+  // Starting PM2 through systemd first keeps it from running outside its boot service.
+  if (action === 'start' || action === 'restart') await pm2.ensureDaemon(req.params.id);
   let cmd = `pm2 ${action} ${q(name)} && pm2 save`;
   if (action === 'start') cmd = `cd ${q(appDir(name))} && pm2 start ${PM2_FILE} && pm2 save`;
-  if (action === 'delete') cmd = `pm2 delete ${q(name)} >/dev/null 2>&1; pm2 save`;
+  if (action === 'stop') cmd = pm2.whenRunning(cmd, 'true');
+  if (action === 'delete') cmd = pm2.whenRunning(`pm2 delete ${q(name)} >/dev/null 2>&1; pm2 save`, 'true');
   await ssh.exec(req.params.id, cmd, { check: true });
   // /var/www itself is root-owned, so removing the app folder needs sudo.
   if (action === 'delete' && req.body?.deleteFiles) {
@@ -277,7 +269,10 @@ router.post('/node-apps/:name/:action', async (req, res) => {
 router.get('/node-apps/:name/logs', async (req, res) => {
   const name = appName(req.params.name);
   const lines = Math.min(Number(req.query.lines) || 200, 2000);
-  const r = await ssh.exec(req.params.id, `pm2 logs ${q(name)} --lines ${lines} --nostream --raw 2>&1`);
+  const r = await ssh.exec(
+    req.params.id,
+    pm2.whenRunning(`pm2 logs ${q(name)} --lines ${lines} --nostream --raw 2>&1`, `echo "(PM2 is not running; showing the saved log files)"; tail -n ${lines} ~/.pm2/logs/${q(name)}-out.log ~/.pm2/logs/${q(name)}-error.log 2>&1`),
+  );
   res.json({ log: r.stdout });
 });
 

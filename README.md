@@ -10,14 +10,16 @@ Give it your server's IP, username and password (or SSH key), and you can:
 | **Terminal** | A full SSH terminal in the browser, with a **command book**: about 140 everyday commands in 18 sections (services, logs, Nginx, SSL, MongoDB, MariaDB, PM2, Git, Docker, firewall, disk cleanup…), each explained in plain English. Search, fill in values, then Insert or Run. Risky ones ask first, and you can save your own. |
 | **File Manager** | Browse, upload (drag & drop), download (folders as `.tar.gz`), edit, rename, delete, chmod/chown, extract `.zip`/`.tar.gz`. Falls back to sudo for root-owned files. |
 | **App Store** | One-click installs: Nginx, MongoDB 8.0, MariaDB, Redis, Node.js 22, PM2, PHP-FPM, Docker, Certbot, UFW, Fail2ban, Git. Two "quick stacks" install everything for a Node+MongoDB SaaS or a PHP+MariaDB site. Also search and install any apt package. |
-| **Services** | Start / stop / restart / enable / disable systemd services and read their logs. |
+| **Services** | Start / stop / restart / enable / disable systemd services and read their logs. Starting the PM2 service takes over a PM2 that was started by hand, instead of failing. |
 | **Websites** | Create Nginx sites (static, single-page app, PHP, or reverse proxy to an app port). Edit config with automatic `nginx -t` rollback. Free Let's Encrypt SSL in one click. |
 | **Node Apps** | Deploy a Node.js app from Git (or from uploaded files), set environment variables, run it with PM2, put it on a domain, redeploy with one click, view logs. |
-| **Databases** | **MariaDB:** create databases + users, browse tables, run SQL, export (`.sql.gz`) and import. **MongoDB:** browse databases/collections/documents, insert/edit/delete documents, create per-app users (gives you the connection string), and turn on authentication with one click. |
+| **Databases** | **MariaDB:** create databases + users, browse tables, run SQL, export (`.sql.gz`) and import. **MongoDB:** browse databases/collections/documents, insert and edit documents with a **form** (field types: text, number, yes/no, date, ObjectId, list, object…) or as JSON, delete documents, **import** a collection from a JSON / NDJSON / CSV file and **export** it as JSON, create per-app users (gives you the connection string), and turn on authentication with one click. |
 | **Data APIs** | Turn a MongoDB collection into a REST API in a few clicks: choose per endpoint (list / count / get / create / update / replace / delete) whether it is off, public or needs an API key; hide, protect and require fields; manage keys; try requests; get ready-to-paste code. Each collection also has a **Connect** guide for using the database from your backend and web pages. |
 | **Firewall** | Manage UFW rules. It always allows your SSH port before turning on, so you can't lock yourself out. |
 | **Tasks** | Live logs of every install / deployment. |
 | **Administration** | Users, roles & permissions for your team, and an activity log of who did what (stored in MongoDB). Owner only. |
+
+Only the database engines installed on the server are shown (e.g. just MongoDB).
 
 Installers target **Ubuntu 22.04 / 24.04** (Azure's default images) and Debian.
 
@@ -155,6 +157,8 @@ Serverboy starts with two roles you can edit: **Developer** (Databases, Websites
 - cannot create or delete whole websites or databases, or use the MariaDB SQL console (it runs as the database root user and could reach other databases). They get a table browser instead.
 
 Access only narrows what the role allows: without the *Databases* permission, picking databases gives nothing.
+
+**After you update Serverboy**, everyone who has it open on an older version sees *"Serverboy was updated"* with **What's new** (from `lib/changelog.js`) and a **Refresh now** button, within about 2 minutes. Logins survive updates. Under **Administration → Settings → Updates and team message** you can see who still runs an older version, and send a message to the team: either only to people on an older version (next to the refresh notice) or to everyone.
 
 Permission changes, disabling and deleting a user take effect immediately (their sessions end). The activity log records logins, every change and every download (who, when, from which IP, and whether it was allowed) and keeps entries for 90 days. Passwords and file contents are never logged.
 

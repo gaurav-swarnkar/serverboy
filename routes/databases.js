@@ -5,7 +5,8 @@ const multer = require('multer');
 const ssh = require('../lib/ssh');
 const store = require('../lib/store');
 const jobs = require('../lib/jobs');
-const { mongosh } = require('../lib/mongosh');
+const { mongosh, mongoshCommand } = require('../lib/mongosh');
+const { parseImport, ParseError } = require('../lib/import-parse');
 const scope = require('../lib/scope');
 
 const { q, HttpError } = ssh;
@@ -21,6 +22,8 @@ const DB_RULES = [
   ['POST', /^\/mysql\/databases\/([^/]+)\/import$/, (m) => ['mysql', m[1], 'edit']],
   ['*', /^\/mysql\/(users|query)$/, () => ['mysql', null, 'all']],
   ['DELETE', /^\/mongo\/databases\/([^/]+)$/, () => ['mongo', null, 'all']],
+  ['POST', /^\/mongo\/databases\/([^/]+)\/import(\/prepare)?$/, (m) => ['mongo', m[1], 'edit']],
+  ['GET', /^\/mongo\/databases\/([^/]+)\/collections\/[^/]+\/export$/, (m) => ['mongo', m[1], 'view']],
   ['GET', /^\/mongo\/databases\/([^/]+)\/collections$/, (m) => ['mongo', m[1], 'view']],
   ['*', /^\/mongo\/databases\/([^/]+)\/collections(\/[^/]+)?$/, (m) => ['mongo', m[1], 'edit']],
   ['POST', /^\/mongo\/find$/, (m, b) => ['mongo', b.db, 'view']],
@@ -224,6 +227,16 @@ function mongoName(name, what) {
 }
 
 
+// Is MariaDB / MySQL installed? (The Databases page only shows engines that are.)
+router.get('/mysql/status', async (req, res) => {
+  const r = await ssh.exec(
+    req.params.id,
+    `{ command -v mariadbd || command -v mysqld || [ -x /usr/sbin/mariadbd ] || [ -x /usr/sbin/mysqld ]; } >/dev/null 2>&1 && echo installed
+{ systemctl is-active mariadb 2>/dev/null || systemctl is-active mysql 2>/dev/null; } | grep -qx active && echo running`,
+  );
+  res.json({ installed: r.stdout.includes('installed'), running: r.stdout.includes('running') });
+});
+
 router.get('/mongo/status', async (req, res) => {
   const r = await ssh.exec(
     req.params.id,
@@ -282,6 +295,94 @@ router.delete('/mongo/databases/:db/collections/:col', async (req, res) => {
   const col = mongoName(req.params.col, 'collection name');
   await mongosh(req.params.id, `out(db.getSiblingDB(${JSON.stringify(dbName)}).getCollection(${JSON.stringify(col)}).drop());`);
   res.json({ ok: true });
+});
+
+// ---------- import / export a collection ----------
+
+// Parsed uploads waiting for the user to confirm: token -> { serverId, db, path, count, user, at }.
+const pendingImports = new Map();
+const IMPORT_MAX = 200 * 1024 * 1024;
+
+// Step 1: upload and check the file. The documents are staged on the server (one Extended JSON
+// document per line, readable only by the SSH user) and a preview is returned.
+router.post('/mongo/databases/:db/import/prepare', upload.single('file'), async (req, res) => {
+  const dbName = mongoName(req.params.db, 'database name');
+  if (!req.file) throw new HttpError(400, 'Choose a .json, .ndjson or .csv file');
+  if (req.file.size > IMPORT_MAX) throw new HttpError(400, 'The file is larger than 200 MB. Use mongoimport in the terminal for very large files.');
+  let parsed;
+  try {
+    parsed = parseImport(req.file.buffer, req.file.originalname, { types: req.body?.types !== 'false' });
+  } catch (err) {
+    if (err instanceof ParseError) throw new HttpError(400, err.message);
+    throw err;
+  }
+  for (const [t, p] of pendingImports) if (Date.now() - p.at > 60 * 60 * 1000) pendingImports.delete(t);
+  const token = crypto.randomBytes(12).toString('hex');
+  const remote = `/tmp/.serverboy-import-${token}.ndjson`;
+  const s = await ssh.sftp(req.params.id);
+  const data = Buffer.from(`${parsed.docs.map((d) => JSON.stringify(d)).join('\n')}\n`);
+  await new Promise((resolve, reject) => s.writeFile(remote, data, { mode: 0o600 }, (e) => (e ? reject(e) : resolve())));
+  await ssh.exec(req.params.id, "find /tmp -maxdepth 1 -name '.serverboy-import-*' -mmin +120 -delete 2>/dev/null; true");
+  pendingImports.set(token, { serverId: req.params.id, db: dbName, path: remote, count: parsed.docs.length, user: req.user.username, at: Date.now() });
+  const existing = await mongosh(
+    req.params.id,
+    `const d = db.getSiblingDB(${JSON.stringify(dbName)});
+out(d.getCollectionInfos({}, { nameOnly: true }).map((c) => ({ name: c.name, count: d.getCollection(c.name).estimatedDocumentCount() })));`,
+  ).catch(() => []);
+  res.json({ token, format: parsed.format, count: parsed.docs.length, fields: parsed.fields.slice(0, 60), sample: parsed.docs.slice(0, 3), collections: existing });
+});
+
+// Step 2: insert the staged documents (optionally replacing the collection's contents).
+router.post('/mongo/databases/:db/import', async (req, res) => {
+  const dbName = mongoName(req.params.db, 'database name');
+  const col = mongoName(req.body?.collection, 'collection name');
+  const p = pendingImports.get(String(req.body?.token || ''));
+  if (!p || p.serverId !== req.params.id || p.db !== dbName || p.user !== req.user.username) throw new HttpError(400, 'This upload has expired. Choose the file again.');
+  pendingImports.delete(req.body.token);
+  const replace = req.body?.mode === 'replace';
+  const result = await mongosh(
+    req.params.id,
+    `const fs = require('fs');
+const c = db.getSiblingDB(${JSON.stringify(dbName)}).getCollection(${JSON.stringify(col)});
+const lines = fs.readFileSync(${JSON.stringify(p.path)}, 'utf8').split('\\n').filter((l) => l.trim());
+try { fs.unlinkSync(${JSON.stringify(p.path)}); } catch (e) {}
+${replace ? 'c.deleteMany({});' : ''}
+const before = c.countDocuments();
+const errors = [];
+let failed = 0;
+for (let i = 0; i < lines.length; i += 1000) {
+  const batch = lines.slice(i, i + 1000).map((l) => EJSON.parse(l));
+  try {
+    c.insertMany(batch, { ordered: false });
+  } catch (e) {
+    const we = e.writeErrors || (e.result && e.result.writeErrors) || [];
+    failed += we.length || 0;
+    for (const w of we.slice(0, 5 - errors.length)) errors.push(String(w.errmsg || w.err?.errmsg || w.message || w).slice(0, 200));
+    if (!we.length) { errors.push(String(e.message).slice(0, 300)); break; }
+  }
+}
+out({ inserted: c.countDocuments() - before, failed, errors, total: c.countDocuments() });`,
+    undefined,
+    { timeout: 15 * 60 * 1000 },
+  );
+  res.json({ ...result, replaced: replace });
+});
+
+// Download a collection as a JSON array (Extended JSON keeps ObjectIds and dates).
+router.get('/mongo/databases/:db/collections/:col/export', async (req, res) => {
+  const dbName = mongoName(req.params.db, 'database name');
+  const col = mongoName(req.params.col, 'collection name');
+  const js = `const cur = db.getSiblingDB(${JSON.stringify(dbName)}).getCollection(${JSON.stringify(col)}).find();
+print('[');
+let first = true;
+while (cur.hasNext()) { const line = EJSON.stringify(cur.next(), null, 0, { relaxed: true }); print((first ? '' : ',') + line); first = false; }
+print(']');`;
+  const stream = await ssh.execStream(req.params.id, mongoshCommand(req.params.id, js));
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="${dbName}.${col}-${stamp}.json"`);
+  stream.pipe(res);
+  res.on('close', () => stream.close());
 });
 
 function collectionRef(body) {

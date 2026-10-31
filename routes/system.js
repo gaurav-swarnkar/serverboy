@@ -1,6 +1,7 @@
 // Dashboard stats, services, processes, software catalog, packages, firewall and jobs.
 const express = require('express');
 const ssh = require('../lib/ssh');
+const pm2 = require('../lib/pm2');
 const jobs = require('../lib/jobs');
 const catalog = require('../lib/catalog');
 
@@ -153,6 +154,14 @@ router.post('/services/:name/:action', async (req, res) => {
   const { name, action } = req.params;
   if (!SERVICE_RE.test(name)) throw new HttpError(400, 'Invalid service name');
   if (!['start', 'stop', 'restart', 'reload', 'enable', 'disable'].includes(action)) throw new HttpError(400, 'Invalid action');
+  const unit = name.replace(/\.service$/, '');
+  if (/^pm2-/.test(unit) && (action === 'start' || action === 'restart')) {
+    // A PM2 started outside systemd (by "pm2 start" in a terminal) makes a plain start fail;
+    // take it over instead (lib/pm2.js).
+    if (action === 'restart') await ssh.exec(req.params.id, `systemctl stop ${q(unit)}`, { sudo: true });
+    await ssh.exec(req.params.id, pm2.adoptScript(unit.slice(4)), { sudo: true, check: true, timeout: 120000 });
+    return res.json({ ok: true });
+  }
   await ssh.exec(req.params.id, `systemctl ${action} ${q(name)}`, { sudo: true, check: true });
   res.json({ ok: true });
 });

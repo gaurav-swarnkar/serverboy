@@ -14,6 +14,7 @@ const { buildSteps, readRemote } = require('./nodeapps');
 const catalog = require('../lib/catalog');
 const { can } = require('../lib/permissions');
 const scope = require('../lib/scope');
+const pm2 = require('../lib/pm2');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
@@ -91,14 +92,14 @@ router.get('/mongo/apis', async (req, res) => {
   echo "##API $(basename "$d")"; cat "$f"; echo
   echo "##APP"; cat "$d/.serverboy-app.json" 2>/dev/null; echo
 done
-echo "##PM2"; command -v pm2 >/dev/null && pm2 jlist 2>/dev/null | tail -1; echo`,
+echo "##PM2"; command -v pm2 >/dev/null && ${pm2.whenRunning('pm2 jlist 2>/dev/null | tail -1')}; echo`,
   );
   const [apisPart, pm2Part] = r.stdout.split('##PM2');
-  let pm2 = [];
+  let procs = [];
   try {
-    pm2 = JSON.parse((pm2Part || '').trim() || '[]');
+    procs = JSON.parse((pm2Part || '').trim() || '[]');
   } catch {
-    pm2 = [];
+    procs = [];
   }
   const apis = [];
   for (const chunk of apisPart.split('##API ').slice(1)) {
@@ -108,7 +109,7 @@ echo "##PM2"; command -v pm2 >/dev/null && pm2 jlist 2>/dev/null | tail -1; echo
     try {
       const cfg = JSON.parse(head.slice(nl + 1));
       const app = appJson && appJson.trim() ? JSON.parse(appJson) : {};
-      const proc = pm2.find((p) => p.name === name);
+      const proc = procs.find((p) => p.name === name);
       apis.push({
         name,
         database: cfg.database,
@@ -131,7 +132,7 @@ router.get('/mongo/apis/:name', async (req, res) => {
   const app = JSON.parse((await readRemote(req.params.id, `${dir(name)}/.serverboy-app.json`)) || '{}');
   const r = await ssh.exec(
     req.params.id,
-    `pm2 jlist 2>/dev/null | tail -1; echo; ${app.port ? `curl -s -m 3 http://127.0.0.1:${Number(app.port)}/health; ` : ''}echo; grep -l 'ssl_certificate' /etc/nginx/sites-enabled/${q(app.domain || 'none')} 2>/dev/null`,
+    `${pm2.whenRunning('pm2 jlist 2>/dev/null | tail -1')}; echo; ${app.port ? `curl -s -m 3 http://127.0.0.1:${Number(app.port)}/health; ` : ''}echo; grep -l 'ssl_certificate' /etc/nginx/sites-enabled/${q(app.domain || 'none')} 2>/dev/null`,
   );
   const [jlist, healthLine, ...rest] = r.stdout.split('\n');
   let engine = null;
@@ -170,7 +171,7 @@ router.post('/mongo/apis', async (req, res) => {
     serverId,
     `command -v node >/dev/null && echo HAS_NODE; command -v npm >/dev/null && echo HAS_NPM; command -v pm2 >/dev/null && echo HAS_PM2
 [ -e ${q(dir(name))} ] && echo DIR_EXISTS; [ -f ${q(configPath(name))} ] && echo HAS_CONFIG
-command -v pm2 >/dev/null && pm2 jlist 2>/dev/null | grep -qF '"name":"${name}"' && echo IN_PM2`,
+command -v pm2 >/dev/null && ${pm2.whenRunning(`pm2 jlist 2>/dev/null | grep -qF '"name":"${name}"' && echo IN_PM2`, `grep -qE '"name": ?"${name}"' ~/.pm2/dump.pm2 2>/dev/null && echo IN_PM2`)}`,
   );
   const has = (flag) => pre.stdout.includes(flag);
   // A folder with api.config.json but no PM2 process is an earlier attempt that did not finish:
@@ -550,6 +551,7 @@ router.post('/mongo/apis/:name/upgrade', async (req, res) => {
         },
       },
       { label: 'Installing dependencies', cmd: `cd ${q(dir(name))} && npm install --omit=dev --no-audit --no-fund` },
+      { label: 'Checking PM2', fn: async (log) => log(`${await pm2.ensureDaemon(serverId)}\n`) },
       { label: 'Restarting', cmd: `pm2 restart ${q(name)} && pm2 save && sleep 2 && curl -s -m 10 http://127.0.0.1:$(grep -o '"port": *[0-9]*' ${q(`${dir(name)}/.serverboy-app.json`)} | grep -o '[0-9]*$')/health; echo` },
     ]),
   );
@@ -560,7 +562,7 @@ router.delete('/mongo/apis/:name', async (req, res) => {
   const name = apiName(req.params.name);
   const cfg = await loadConfig(serverId, name);
   const app = JSON.parse((await readRemote(serverId, `${dir(name)}/.serverboy-app.json`)) || '{}');
-  await ssh.exec(serverId, `pm2 delete ${q(name)} >/dev/null 2>&1; pm2 save >/dev/null 2>&1; true`);
+  await ssh.exec(serverId, pm2.whenRunning(`pm2 delete ${q(name)} >/dev/null 2>&1; pm2 save >/dev/null 2>&1; true`, 'true'));
   const dbUser = `api_${name.replace(/-/g, '_')}`;
   await mongosh(serverId, `const d = db.getSiblingDB(${JSON.stringify(cfg.database)}); if (d.getUser(${JSON.stringify(dbUser)})) d.dropUser(${JSON.stringify(dbUser)}); out({ ok: 1 });`).catch(() => {});
   let cmd = `rm -rf -- ${q(dir(name))}`;

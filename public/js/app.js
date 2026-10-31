@@ -1,4 +1,5 @@
 import { api, esc, toast, loadingHtml, errorHtml, session, can } from './ui.js';
+import { startUpdateWatch } from './updates.js';
 
 // Two areas:
 //   Portal  (#/servers, #/account, #/admin/...) - pick a server, your account, administration
@@ -268,6 +269,7 @@ async function start() {
   const me = await api('/me');
   if (!me.loggedIn) return showLogin();
   session.user = me.user;
+  startUpdateWatch();
   await refreshServers();
   if (!location.hash || location.hash === '#/' || location.hash === '#') {
     // One server: go straight to it. Several: let the user pick.

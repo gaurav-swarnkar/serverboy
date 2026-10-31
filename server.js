@@ -7,6 +7,7 @@ const auth = require('./lib/auth');
 const terminal = require('./lib/terminal');
 const team = require('./lib/team');
 const { requiredForServerRoute, can } = require('./lib/permissions');
+const version = require('./lib/version');
 
 const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT) || 3000;
@@ -21,6 +22,8 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
+  // Lets open browser tabs notice that Serverboy was updated (public/js/updates.js).
+  res.setHeader('X-Serverboy-Build', version.build);
   res.setHeader(
     'Content-Security-Policy',
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'",
@@ -33,13 +36,28 @@ app.use(express.json({ limit: '20mb' }));
 const vendor = (pkg) => path.dirname(require.resolve(`${pkg}/package.json`));
 app.use('/vendor/xterm', express.static(vendor('@xterm/xterm')));
 app.use('/vendor/xterm-addon-fit', express.static(vendor('@xterm/addon-fit')));
-app.use(express.static(path.join(__dirname, 'public')));
+// Always revalidate (cheap, ETag) so a refresh after an update never runs stale code.
+app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 
 app.use('/api', auth.router);
 
 const api = express.Router();
 api.use(auth.requireAuth);
 api.use(auditLog);
+// Which Serverboy version each person's browser runs (for "who still has to refresh").
+const clients = new Map();
+api.use((req, res, next) => {
+  const b = req.get('x-serverboy-client');
+  if (b && /^[0-9a-f]{12}$/.test(b)) clients.set(req.user.username, { username: req.user.username, name: req.user.name || req.user.username, build: b, at: Date.now() });
+  next();
+});
+api.get('/team/clients', auth.requirePermission('owner'), (req, res) => {
+  const since = Date.now() - 24 * 3600 * 1000;
+  res.json({ build: version.build, clients: [...clients.values()].filter((c) => c.at > since).sort((a, b) => b.at - a.at) });
+});
+api.get('/version', (req, res) => {
+  res.json({ version: version.version, build: version.build, startedAt: version.startedAt, changelog: version.changelog, announcement: store.getAnnouncement() });
+});
 api.use(require('./routes/servers'));
 api.use(require('./routes/team'));
 

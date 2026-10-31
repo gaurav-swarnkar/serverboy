@@ -4,14 +4,21 @@ export function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
+// The Serverboy build this tab runs (set by updates.js). Sent with requests so the owner can
+// see who still has to refresh after an update.
+export const clientInfo = { build: '' };
+
 export async function api(path, { method = 'GET', body, form } = {}) {
   const opts = { method, headers: { 'x-serverboy': '1' } };
+  if (clientInfo.build) opts.headers['x-serverboy-client'] = clientInfo.build;
   if (form) opts.body = form;
   else if (body !== undefined) {
     opts.headers['content-type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
   const res = await fetch(`/api${path}`, opts);
+  const build = res.headers.get('x-serverboy-build');
+  if (build && clientInfo.build && build !== clientInfo.build) window.dispatchEvent(new CustomEvent('sb:build', { detail: build }));
   if (res.status === 401 && path !== '/login') {
     window.dispatchEvent(new Event('sb:logout'));
     throw new Error('Your session expired. Please log in again.');
