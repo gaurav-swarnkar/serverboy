@@ -7,7 +7,7 @@ const { HttpError } = require('../lib/ssh');
 
 const router = express.Router();
 const OWNER_ID = 'owner';
-const COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6', '#64748b'];
+const COLORS = ['#0f3d2e', '#2f7d4f', '#6dbb4a', '#0e7490', '#b45309', '#be185d', '#6d28d9', '#475569', '#a16207'];
 const AVATAR_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
 
 const idOf = (user) => (user.isOwner ? OWNER_ID : String(user.id));

@@ -20,9 +20,17 @@ export function initials(p) {
     .toUpperCase();
 }
 
+// A steady colour per person until they choose one.
+const DEFAULT_COLORS = ['#0f3d2e', '#2f7d4f', '#0e7490', '#b45309', '#be185d', '#6d28d9', '#475569', '#a16207'];
+export function colorFor(name = '') {
+  let h = 0;
+  for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return DEFAULT_COLORS[h % DEFAULT_COLORS.length];
+}
+
 export function avatarHtml(p, size = 40) {
   const pr = p.profile || {};
-  const style = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.38)}px;background:${esc(pr.color || '#6366f1')}`;
+  const style = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.38)}px;background:${esc(pr.color || colorFor(p.username || p.name))}`;
   return pr.avatar ? `<img class="pf-avatar" style="${style}" src="${esc(pr.avatar)}" alt="">` : `<span class="pf-avatar" style="${style}">${esc(initials(p))}</span>`;
 }
 

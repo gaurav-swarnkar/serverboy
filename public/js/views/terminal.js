@@ -51,7 +51,7 @@ export async function render(el, { server }) {
     cursorBlink: true,
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: 13.5,
-    theme: { background: '#0b0e19' },
+    theme: { background: '#0f1c16', cursor: '#9be15d', selectionBackground: '#2f6b4a' },
     scrollback: 5000,
   });
   const fit = new window.FitAddon.FitAddon();

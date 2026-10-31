@@ -1,7 +1,7 @@
 // Dashboard health card: essential services, websites, Node apps, with diagnosis and fixes.
 import { api, esc, toast, modal, confirmDialog, loadingHtml, errorHtml, can, onAction } from '../ui.js';
 
-const DOT = { ok: '🟢', warn: '🟡', bad: '🔴', off: '⚪' };
+const DOT = { ok: '<i class="dot ok"></i>', warn: '<i class="dot warn"></i>', bad: '<i class="dot bad"></i>', off: '<i class="dot"></i>' };
 const REFRESH_MS = 60 * 1000;
 
 function since(ms) {
@@ -12,13 +12,14 @@ function since(ms) {
   return `${Math.round(s / 86400)}d`;
 }
 
-export function mountHealth(el, server) {
+// onData(report) is called after each check (the dashboard's score card uses it).
+export function mountHealth(el, server, { onData } = {}) {
   const base = `/servers/${server.id}`;
   let timer = null;
   let stopped = false;
   let data = null;
 
-  el.innerHTML = `<div class="card health-card" style="margin-bottom:16px">${loadingHtml('Checking services and websites…')}</div>`;
+  el.innerHTML = `<div class="card health-card">${loadingHtml('Checking services and websites…')}</div>`;
   const card = el.querySelector('.health-card');
 
   async function load() {
@@ -26,6 +27,7 @@ export function mountHealth(el, server) {
     try {
       data = await api(`${base}/health`);
       if (!stopped) draw();
+      if (!stopped) onData?.(data);
     } catch (err) {
       if (!stopped) card.innerHTML = `<h2>Health</h2>${errorHtml(err)}`;
     }
