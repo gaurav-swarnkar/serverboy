@@ -505,9 +505,11 @@ async function renderApi(el, ctx, svcName, slug, tab) {
       <div class="row"><a class="btn btn-sm" href="${ctx.docsUrl(svcName, slug)}">📖 Swagger</a><button class="btn-sm" data-action="downloadDocs">⬇ .txt</button><a class="btn btn-sm" href="${ctx.svcUrl(svcName, 'settings')}" title="API server ${esc(svcName)}">⚙ Server</a></div>
     </div>
     ${info.needsUpgrade ? upgradeNotice(info) : ''}
+    <div id="addr-check"></div>
     <div class="tabs">${TABS.map(([id, label]) => `<button class="${tab === id ? 'active' : ''}" data-action="tab" data-tab="${id}">${label}</button>`).join('')}</div>
     <div id="api-body"></div>`;
 
+  addressCheck(el.querySelector('#addr-check'), ctx, svcName, info, canEdit);
   const bodyEl = el.querySelector('#api-body');
   const setTab = (t) => {
     page.tab = t;
@@ -1159,6 +1161,35 @@ async function renderApi(el, ctx, svcName, slug, tab) {
   setTab(tab);
 }
 
+// Ask the server whether the public address really reaches the API; if not, say why and offer a fix.
+async function addressCheck(box, ctx, svcName, info, canEdit) {
+  if (!box || !info.domain || info.status !== 'online') return;
+  let r;
+  try {
+    r = await api(`${ctx.base}/${encodeURIComponent(svcName)}/address-check`);
+  } catch {
+    return;
+  }
+  if (r.ok || !box.isConnected) return;
+  box.innerHTML = `<div class="notice warn" style="margin-bottom:12px"><b>The public address does not reach this API yet.</b> ${esc(r.problem || '')}
+    Test runs inside the server, so it still works there; websites and apps use ${esc(info.domain)}.
+    <div class="row" style="margin-top:8px">${r.fixable && canEdit ? '<button class="btn-sm btn-primary" data-fix>Fix it</button>' : ''}${r.site?.testMode ? `<a class="btn btn-sm" href="#/s/${ctx.server.id}/sites">Open Websites</a>` : ''}<button class="btn-sm" data-recheck>Check again</button></div></div>`;
+  box.querySelector('[data-recheck]').addEventListener('click', () => {
+    box.innerHTML = '';
+    addressCheck(box, ctx, svcName, info, canEdit).then(() => {
+      if (!box.innerHTML) toast(`${info.domain} reaches the API`);
+    });
+  });
+  box.querySelector('[data-fix]')?.addEventListener('click', async (e) => {
+    const out = await run(e.target, () => api(`${ctx.base}/${encodeURIComponent(svcName)}/address-fix`, { method: 'POST' }));
+    if (!out) return;
+    if (out.check?.ok) {
+      box.innerHTML = '';
+      toast(`Fixed: ${(out.changes || []).join('. ') || 'done'}. ${info.domain} now reaches the API.`);
+    } else toast(out.check?.problem || 'Still not reachable', 'error');
+  });
+}
+
 // ======================= one API server =======================
 
 async function renderService(el, ctx, svcName, startTab) {
@@ -1183,6 +1214,7 @@ async function renderService(el, ctx, svcName, startTab) {
     <div class="page-head"><div><h1>API server: ${esc(info.name)} <span class="badge ${online ? 'ok' : 'bad'}" style="vertical-align:middle">${esc(info.status)}</span></h1>
       <div class="sub">Answers the APIs for the database <b>${esc(info.database)}</b> · ${info.url ? `<a class="mono" href="${esc(info.url)}/health" target="_blank" rel="noopener">${esc(info.url)}</a>` : 'not published yet (private to the server)'}</div></div></div>
     ${info.needsUpgrade ? upgradeNotice(info) : ''}
+    <div id="addr-check"></div>
     ${
       online
         ? ''
@@ -1192,6 +1224,7 @@ async function renderService(el, ctx, svcName, startTab) {
     }
     <div class="tabs">${tabs.map(([id, l]) => `<button class="${startTab === id ? 'active' : ''}" data-action="stab" data-tab="${id}">${l}</button>`).join('')}</div>
     <div id="svc-body"></div>`;
+  addressCheck(el.querySelector('#addr-check'), ctx, svcName, info, canEdit);
   const body = el.querySelector('#svc-body');
   let tab = startTab;
 

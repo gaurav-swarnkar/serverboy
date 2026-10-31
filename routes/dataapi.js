@@ -330,13 +330,9 @@ out({ ok: 1 });`,
     steps.push({
       label: `Publishing on ${domain}`,
       fn: async (log) => {
-        try {
-          await nginx.createSite(serverId, { domain, type: 'proxy', port });
-          log(`Nginx now forwards http://${domain} to the API.\n`);
-        } catch (err) {
-          if (err.status !== 409) throw err;
-          log(`${domain} is already set up in Nginx.\n`);
-        }
+        // An existing website on this domain is pointed at the API instead of being left as is.
+        const changes = await nginx.pointSiteToApi(serverId, domain, port);
+        log(`${changes.length ? changes.join('\n') : `${domain} already forwards to the API.`}\nhttp://${domain}/api/… now reaches the API.\n`);
       },
     });
     if (req.body?.https) {
@@ -635,6 +631,25 @@ router.all('/mongo/apis/:name/proxy/*rest', async (req, res) => {
   res.status(Number(status) || 502).type('application/json').send(text || JSON.stringify({ error: 'The API did not answer' }));
 });
 
+// Does the public address really reach the API? (Nginx is asked on the server itself.)
+router.get('/mongo/apis/:name/address-check', async (req, res) => {
+  const name = apiName(req.params.name);
+  const app = JSON.parse((await readRemote(req.params.id, `${dir(name)}/.serverboy-app.json`)) || '{}');
+  if (!app.port) throw new HttpError(404, 'API not found');
+  if (!app.domain) return res.json({ ok: false, domain: null, problem: 'Not published yet: only this server can reach it.', fixable: false });
+  res.json(await nginx.checkApiAddress(req.params.id, app.domain, app.port));
+});
+
+// Repair the public address: point the domain's Nginx website at the API.
+router.post('/mongo/apis/:name/address-fix', async (req, res) => {
+  const name = apiName(req.params.name);
+  const app = JSON.parse((await readRemote(req.params.id, `${dir(name)}/.serverboy-app.json`)) || '{}');
+  if (!app.port || !app.domain) throw new HttpError(400, 'This API has no public address yet. Publish it first.');
+  const changes = await nginx.pointSiteToApi(req.params.id, app.domain, app.port);
+  audit(req, `Data API ${name}: repaired the public address ${app.domain}${changes.length ? ` (${changes.join('; ')})` : ''}`);
+  res.json({ changes, check: await nginx.checkApiAddress(req.params.id, app.domain, app.port) });
+});
+
 // Give an existing (private) API a public address later, e.g. once you have a domain.
 router.post('/mongo/apis/:name/publish', async (req, res) => {
   const serverId = req.params.id;
@@ -648,9 +663,9 @@ router.post('/mongo/apis/:name/publish', async (req, res) => {
     {
       label: `Publishing on ${domain}`,
       fn: async (log) => {
-        await nginx.createSite(serverId, { domain, type: 'proxy', port: app.port });
+        const changes = await nginx.pointSiteToApi(serverId, domain, app.port);
         await ssh.writeFile(serverId, appFile, JSON.stringify({ ...app, domain }, null, 2), { sudo: false });
-        log(`Nginx now forwards http://${domain} to the API.\n`);
+        log(`${changes.length ? changes.join('\n') : `${domain} already forwards to the API.`}\nhttp://${domain}/api/… now reaches the API.\n`);
       },
     },
   ];

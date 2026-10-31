@@ -25,6 +25,7 @@ export async function mountCollectionApis(el, server, db, col, canEdit, services
     const list = apisFor(services, db, col);
     const upgrade = services.find((s) => s.database === db && s.needsUpgrade);
     el.innerHTML = `
+      <div id="addr-checks"></div>
       ${upgrade ? `<div class="notice warn" style="margin-bottom:10px">The API server ${esc(upgrade.name)} needs an engine update. <a href="#/s/${server.id}/apis">Open APIs</a> and click "Update engine".</div>` : ''}
       <div class="card flush">
         <div class="card-head"><h3 style="margin:0">APIs for ${esc(col)}</h3>${canEdit ? `<a class="btn btn-sm btn-primary" href="${newUrl}">+ New API for ${esc(col)}</a>` : ''}</div>
@@ -43,6 +44,15 @@ export async function mountCollectionApis(el, server, db, col, canEdit, services
         }
       </div>
       <p class="small muted">All APIs: <a href="#/s/${server.id}/apis">Hosting → APIs</a>.</p>`;
+    // Warn when a public address does not reach its API server (fixed on the API server page).
+    for (const svc of new Set(list.filter((a) => a.svc.domain && a.svc.status === 'online').map((a) => a.svc))) {
+      api(`/servers/${server.id}/mongo/apis/${encodeURIComponent(svc.name)}/address-check`)
+        .then((r) => {
+          if (r.ok) return;
+          el.querySelector('#addr-checks')?.insertAdjacentHTML('beforeend', `<div class="notice warn" style="margin-bottom:10px"><b>${esc(svc.domain)} does not reach the API yet</b>, so it gives errors outside this page (Test still works because it runs inside the server). ${esc(r.problem || '')} <a class="btn btn-sm" href="#/s/${server.id}/apis/s/${encodeURIComponent(svc.name)}/settings">Fix it</a></div>`);
+        })
+        .catch(() => {});
+    }
     // Endpoints with Test buttons, loaded when opened.
     const infos = {};
     el.onclick = async (e) => {
