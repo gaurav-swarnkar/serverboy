@@ -1,4 +1,4 @@
-import { api, esc, toast, loadingHtml, errorHtml, session, can } from './ui.js';
+import { api, esc, toast, loadingHtml, errorHtml, session, can, viewAsToken, setViewAsToken, withViewAs } from './ui.js';
 import { startUpdateWatch, paintUnread } from './updates.js';
 import { icon, logo } from './icons.js';
 import { getTheme, setTheme, shownTheme } from './theme.js';
@@ -220,7 +220,13 @@ function renderShell(current) {
       ? `<div class="side-help">${icon('users', 26)}<b>Work as a team</b><p>Give developers their own login, with only the access they need.</p><a class="btn btn-primary" href="#/admin/users">Invite your team ${icon('arrow', 14)}</a></div>`
       : `<div class="side-help">${icon('mail', 26)}<b>Questions?</b><p>Write to the owner any time.</p><a class="btn btn-primary" href="#/messages/new">Send a message ${icon('arrow', 14)}</a></div>`;
 
-  app.innerHTML = `
+  // "Log in as" tab: a banner that can't be missed, on every page.
+  const viewAs = user.viewAs
+    ? `<div class="viewas-bar" role="status">${icon('alert', 17)}<span>You are logged in as <b>${esc(user.name || user.username)}</b> (${esc(user.username)} · ${esc(user.role)}) and see exactly what they see. What you do here is logged as done by you.</span><button class="btn-sm" id="viewas-exit">Exit</button></div>`
+    : '';
+  document.body.classList.toggle('viewing-as', Boolean(user.viewAs));
+  document.title = user.viewAs ? `As ${user.username} · Serverboy` : 'Serverboy';
+  app.innerHTML = `${viewAs}
     <div class="layout">
       <aside class="sidebar">
         <a class="brand" href="#/servers">${logo(30)}<span class="brand-name">Serverboy</span></a>
@@ -299,9 +305,11 @@ function renderShell(current) {
   app.querySelector('#server-switch')?.addEventListener('click', () => serverMenu.classList.toggle('hidden'));
   app.querySelector('#logout').addEventListener('click', async (e) => {
     e.preventDefault();
+    if (user.viewAs) return exitViewAs();
     await api('/logout', { method: 'POST' }).catch(() => {});
     showLogin();
   });
+  app.querySelector('#viewas-exit')?.addEventListener('click', exitViewAs);
   setupSearch(server, current);
   return server;
 }
@@ -408,7 +416,43 @@ async function route() {
   }
 }
 
+// Leave a "Log in as" tab: end its session, then close the tab (it was opened by Serverboy).
+async function exitViewAs() {
+  await api('/logout', { method: 'POST' }).catch(() => {});
+  setViewAsToken('');
+  viewAsEnded();
+  window.close();
+}
+
+function viewAsEnded() {
+  state.cleanup?.();
+  state.cleanup = null;
+  session.user = null;
+  document.body.classList.remove('viewing-as');
+  document.title = 'Serverboy';
+  app.innerHTML = `<div class="login-wrap"><div class="card login" style="text-align:center">${logo(44)}<h1 class="login-title">You left the account</h1><p class="muted">The "Log in as" session has ended. You can close this tab.</p><a class="btn btn-primary" href="/">Back to my own account</a></div></div>`;
+}
+window.addEventListener('sb:view-as-ended', viewAsEnded);
+
+// Downloads are plain links: in a "Log in as" tab they must carry the tab's session.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a[href^="/api/"]');
+  if (a && viewAsToken() && !a.href.includes('sbs=')) a.setAttribute('href', withViewAs(a.getAttribute('href')));
+}, true);
+
 async function start() {
+  // Opened from Administration → Users → Log in as: trade the one-time code for this tab's session.
+  const asCode = new URLSearchParams(location.search).get('as');
+  if (asCode && /^[a-f0-9]{48}$/.test(asCode)) {
+    history.replaceState(null, '', location.pathname);
+    try {
+      const r = await api('/view-as-start', { method: 'POST', body: { code: asCode } });
+      setViewAsToken(r.token);
+    } catch (err) {
+      app.innerHTML = `<div class="login-wrap"><div class="card login" style="text-align:center">${logo(44)}<h1 class="login-title">Could not open the account</h1><p class="muted">${esc(err.message)}</p><a class="btn btn-primary" href="/">Back to my own account</a></div></div>`;
+      return;
+    }
+  }
   const me = await api('/me');
   if (!me.loggedIn) return showLogin();
   session.user = me.user;

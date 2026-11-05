@@ -1,4 +1,4 @@
-import { esc, toast, confirmDialog, formDialog, onAction } from '../ui.js';
+import { esc, toast, confirmDialog, formDialog, onAction, withViewAs } from '../ui.js';
 import { COMMAND_BOOK, placeholders, fill } from '../commandbook.js';
 
 const BOOK_OPEN_KEY = 'sb-cmdbook-open';
@@ -68,7 +68,7 @@ export async function render(el, { server }) {
     statusEl.className = 'badge';
     statusEl.textContent = 'connecting…';
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/ws/terminal?server=${server.id}&cols=${term.cols}&rows=${term.rows}`);
+    ws = new WebSocket(withViewAs(`${proto}://${location.host}/ws/terminal?server=${server.id}&cols=${term.cols}&rows=${term.rows}`));
     ws.onopen = () => {
       statusEl.className = 'badge ok';
       statusEl.textContent = 'connected';

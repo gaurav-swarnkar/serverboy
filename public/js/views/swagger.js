@@ -1,5 +1,6 @@
 // Swagger UI (served from node_modules/swagger-ui-dist at /vendor/swagger-ui) for the
 // OpenAPI description of a Data API service.
+import { viewAsToken, withViewAs } from '../ui.js';
 let loading = null;
 
 function loadSwagger() {
@@ -24,7 +25,7 @@ export async function mountSwagger(el, specUrl) {
   await loadSwagger();
   el.innerHTML = '';
   window.SwaggerUIBundle({
-    url: specUrl,
+    url: withViewAs(specUrl),
     domNode: el,
     deepLinking: false,
     docExpansion: 'list',
@@ -32,7 +33,10 @@ export async function mountSwagger(el, specUrl) {
     persistAuthorization: true,
     // "Try it out" through Serverboy needs Serverboy's request header (CSRF protection).
     requestInterceptor: (req) => {
-      if (new URL(req.url, location.href).origin === location.origin) req.headers['x-serverboy'] = '1';
+      if (new URL(req.url, location.href).origin === location.origin) {
+        req.headers['x-serverboy'] = '1';
+        if (viewAsToken()) req.headers['x-serverboy-session'] = viewAsToken();
+      }
       return req;
     },
   });

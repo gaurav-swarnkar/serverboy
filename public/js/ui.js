@@ -8,9 +8,33 @@ export function esc(value) {
 // see who still has to refresh after an update.
 export const clientInfo = { build: '' };
 
+// A "Log in as" tab has its own session token, kept only in this tab (sessionStorage).
+const VIEW_AS_KEY = 'sb-view-as';
+export function viewAsToken() {
+  try {
+    return sessionStorage.getItem(VIEW_AS_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+export function setViewAsToken(token) {
+  try {
+    if (token) sessionStorage.setItem(VIEW_AS_KEY, token);
+    else sessionStorage.removeItem(VIEW_AS_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+// Plain links (downloads) and the terminal socket can't send headers: add the token to the URL.
+export function withViewAs(url) {
+  const t = viewAsToken();
+  return t ? `${url}${url.includes('?') ? '&' : '?'}sbs=${encodeURIComponent(t)}` : url;
+}
+
 export async function api(path, { method = 'GET', body, form } = {}) {
   const opts = { method, headers: { 'x-serverboy': '1' } };
   if (clientInfo.build) opts.headers['x-serverboy-client'] = clientInfo.build;
+  if (viewAsToken()) opts.headers['x-serverboy-session'] = viewAsToken();
   if (form) opts.body = form;
   else if (body !== undefined) {
     opts.headers['content-type'] = 'application/json';
@@ -20,6 +44,11 @@ export async function api(path, { method = 'GET', body, form } = {}) {
   const build = res.headers.get('x-serverboy-build');
   if (build && clientInfo.build && build !== clientInfo.build) window.dispatchEvent(new CustomEvent('sb:build', { detail: build }));
   if (res.status === 401 && path !== '/login') {
+    if (viewAsToken()) {
+      setViewAsToken('');
+      window.dispatchEvent(new Event('sb:view-as-ended'));
+      throw new Error('The "Log in as" session has ended.');
+    }
     window.dispatchEvent(new Event('sb:logout'));
     throw new Error('Your session expired. Please log in again.');
   }

@@ -623,3 +623,15 @@ td.actions > button, td.actions > .btn, td.actions > .badge { margin: 2px 0 2px 
 .menu .menu-user { display: flex; align-items: center; gap: 10px; }
 .menu .menu-user .avatar { flex: none; }
 .menu #logout { color: var(--bad); }
+
+/* "Log in as" tab */
+.viewas-bar {
+  position: sticky; top: 0; z-index: 60; display: flex; align-items: center; gap: 10px;
+  min-height: 42px; padding: 7px 20px; background: #b45309; color: #fff; font-size: 13.5px; line-height: 1.35;
+}
+.viewas-bar span { flex: 1; min-width: 0; }
+.viewas-bar .btn-sm { background: #fff; color: #7c2d12; border-color: transparent; font-weight: 600; }
+.viewas-bar .btn-sm:hover { background: #fde9d4; }
+body.viewing-as .sidebar { top: 42px; height: calc(100vh - 42px); }
+body.viewing-as .layout { min-height: calc(100vh - 42px); }
+body.viewing-as .topbar { top: 42px; }

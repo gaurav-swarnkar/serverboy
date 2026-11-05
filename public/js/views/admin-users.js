@@ -31,6 +31,7 @@ export async function render(el, { servers }) {
               <td>${u.disabled ? '<span class="badge bad">disabled</span>' : '<span class="badge ok">active</span>'}</td>
               <td class="small">${u.lastLoginAt ? fmtDate(Date.parse(u.lastLoginAt)) : '<span class="muted">never</span>'}</td>
               <td class="actions">
+                ${u.disabled ? '' : `<button class="btn-sm" data-action="viewAs" data-i="${i}" title="Open ${esc(u.username)}'s account in a new tab to see exactly what they see">Log in as</button>`}
                 <button class="btn-sm" data-action="edit" data-i="${i}">Edit</button>
                 <button class="btn-sm" data-action="reset" data-i="${i}">Reset password</button>
                 <button class="btn-sm" data-action="toggle" data-i="${i}">${u.disabled ? 'Enable' : 'Disable'}</button>
@@ -153,6 +154,17 @@ Password: ${esc(password)}</pre>
         showCredentials(r.user.username, r.password, r.user.email);
         load();
       }
+    },
+    // Open the member's account in a separate tab; this tab stays logged in as the owner.
+    viewAs: async ({ i }, btn) => {
+      const u = users[i];
+      const tab = window.open('about:blank', '_blank');
+      if (!tab) return toast('Your browser blocked the new tab. Allow pop-ups for Serverboy and try again.', 'error');
+      tab.document.write('<p style="font-family:system-ui;padding:24px">Opening the account…</p>');
+      const r = await run(btn, () => api(`/view-as/${encodeURIComponent(u.id)}`, { method: 'POST' }));
+      if (!r) return tab.close();
+      tab.location.replace(`${location.origin}${location.pathname}?as=${r.code}`);
+      toast(`Opened ${u.username}'s account in a new tab. Your own login here is unchanged.`, 'ok');
     },
     edit: async ({ i }) => {
       const r = await userDialog(users[i]);
