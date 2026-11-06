@@ -66,7 +66,7 @@ const SERVER_NAV = [
 ];
 
 const PORTAL_NAV = [
-  ['Main menu', [['servers', 'server', 'All servers', '#/servers'], ['people', 'users', 'Team', '#/people'], ['messages', 'mail', 'Messages', '#/messages']]],
+  ['Main menu', [['servers', 'home', 'Home', '#/servers'], ['people', 'users', 'Team', '#/people'], ['messages', 'mail', 'Messages', '#/messages']]],
   [
     'Administration',
     [
@@ -94,7 +94,7 @@ const PAGE_INFO = {
   firewall: ['Firewall', 'Choose which ports the internet can reach.'],
   jobs: ['Tasks', 'Live logs of installs and deployments.'],
   backups: ['Backups', 'Automatic copies of your data, with one-click restore.'],
-  servers: ['Servers', 'All the servers you manage with Serverboy.'],
+  servers: ['Home', 'All your servers at a glance.'],
   people: ['Team', 'Everyone who works on these servers.'],
   messages: ['Messages', 'Talk to your team.'],
   account: ['My account', 'Your login and password.'],
@@ -211,7 +211,7 @@ function renderShell(current) {
         <div class="menu side-menu hidden" id="server-menu">
           <div class="menu-head">Switch server</div>
           ${state.servers.map((s) => `<a href="#/s/${s.id}/${current.view}" class="${s.id === server.id ? 'on' : ''}">${icon('server', 16)} ${esc(s.name)}</a>`).join('')}
-          <hr><a href="#/servers">${icon('grid', 16)} All servers</a>
+          <hr><a href="#/servers">${icon('home', 16)} Home</a>
         </div>
       </div>`
     : `<a class="side-card" href="#/people/me">${avatarOf(user, 34)}<span class="side-card-text"><b>${esc(user.name || user.username)}</b><small>${esc(user.role)}</small></span></a>`;
@@ -265,7 +265,7 @@ function renderShell(current) {
             <a href="#/messages">${icon('mail', 16)} Messages</a>
             <a href="#/people">${icon('users', 16)} Team</a>
             ${user.isOwner ? `<a href="#/admin/users">${icon('shield', 16)} Administration</a><a href="#/admin/settings">${icon('settings', 16)} Settings</a>` : ''}
-            <a href="#/servers">${icon('grid', 16)} All servers</a>
+            <a href="#/servers">${icon('home', 16)} Home</a>
             <hr>
             <a href="#" id="logout">${icon('logout', 16)} Log out</a>
           </div>
@@ -462,8 +462,7 @@ async function start() {
   startUpdateWatch();
   await refreshServers();
   if (!location.hash || location.hash === '#/' || location.hash === '#') {
-    // One server: go straight to it. Several: let the user pick.
-    if (state.servers.length === 1) return navigate(`#/s/${state.servers[0].id}/dashboard`);
+    // Always start on Home, which shows every server at a glance.
     return navigate('#/servers');
   }
   route();
