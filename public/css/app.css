@@ -663,3 +663,9 @@ body.viewing-as .topbar { top: 42px; }
 .home-msgs { margin-bottom: 16px; display: flex; flex-direction: column; gap: 6px; }
 .home-msg { display: flex; flex-direction: column; padding: 8px 10px; border-radius: 10px; color: var(--text); text-decoration: none; }
 .home-msg:hover { background: var(--panel-2); }
+
+/* Databases: Your databases / System & internal */
+.db-kind-row { padding: 0 12px 10px; }
+.db-kind-row .db-kind { width: 100%; }
+.db-sys-note { margin: 0 12px 10px; }
+.db-lock { cursor: help; white-space: nowrap; }

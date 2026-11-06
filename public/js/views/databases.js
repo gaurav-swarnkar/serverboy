@@ -1,5 +1,34 @@
 import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, fmtBytes, onAction, loadingHtml, errorHtml, randomPassword, can, hasAll } from '../ui.js';
 import { mountConnectGuide, mountCollectionApis, loadApiServices, apisFor } from './data-api.js';
+
+
+// Databases are shown in two groups: the user's own, and "System & internal" (the database
+// server's own and Serverboy's), which are read-only. The choice is remembered per browser.
+const KIND_KEY = 'sb-db-kind';
+function shownKind() {
+  try {
+    return sessionStorage.getItem(KIND_KEY) === 'system' ? 'system' : 'user';
+  } catch {
+    return 'user';
+  }
+}
+function setKind(k) {
+  try {
+    sessionStorage.setItem(KIND_KEY, k);
+  } catch {
+    /* private mode */
+  }
+}
+function kindPicker(dbs) {
+  const sys = dbs.filter((d) => d.protected).length;
+  const k = shownKind();
+  return `<select class="db-kind" data-db-kind aria-label="Which databases to show">
+    <option value="user" ${k === 'user' ? 'selected' : ''}>Your databases (${dbs.length - sys})</option>
+    <option value="system" ${k === 'system' ? 'selected' : ''}>System &amp; internal (${sys})</option>
+  </select>`;
+}
+const lockBadge = (p) => `<span class="badge db-lock" title="${esc(p.reason)}">🔒 ${esc(p.label)}</span>`;
+const systemNotice = (engine) => `<div class="notice small db-sys-note">These belong to ${engine} itself or to Serverboy. They are <b>read-only</b> here so nothing critical is deleted by accident. You can still browse and export them.</div>`;
 import { docForm } from './doc-form.js';
 
 // Only engines installed on the server are shown (most people use just one).
@@ -68,27 +97,33 @@ function renderMysql(el, server) {
     <div id="result" style="margin-top:16px"></div>`;
 
   const dbsEl = el.querySelector('#dbs');
+  dbsEl.addEventListener('change', (e) => {
+    if (!e.target.matches('[data-db-kind]')) return;
+    setKind(e.target.value);
+    load();
+  });
   const select = el.querySelector('select[name=database]') || document.createElement('select');
   const resultEl = el.querySelector('#result');
 
   async function load() {
     try {
       dbs = await api(`${base}/databases`);
-      const userDbs = dbs.filter((d) => !d.system);
-      dbsEl.innerHTML = `<div class="table-wrap"><table>
+      const kind = shownKind();
+      const userDbs = dbs.filter((d) => (kind === 'system') === Boolean(d.protected));
+      dbsEl.innerHTML = `<div class="db-kind-row">${kindPicker(dbs)}</div>${kind === 'system' ? systemNotice('MySQL') : ''}<div class="table-wrap"><table>
         <thead><tr><th>Name</th><th>Tables</th><th>Size</th><th></th></tr></thead>
         <tbody>${userDbs
           .map(
-            (d) => `<tr><td><b>${esc(d.name)}</b></td><td>${d.tables}</td><td>${fmtBytes(d.size)}</td>
+            (d) => `<tr><td><b>${esc(d.name)}</b>${d.protected ? `<div class="small muted">${lockBadge(d.protected)}</div>` : ''}</td><td>${d.tables}</td><td>${fmtBytes(d.size)}</td>
             <td class="actions">
               <button class="btn-sm" data-action="tables" data-name="${esc(d.name)}">Tables</button>
               <a class="btn btn-sm" href="/api${base}/databases/${encodeURIComponent(d.name)}/export" download>Export</a>
-              ${d.access === 'edit' ? `<button class="btn-sm" data-action="import" data-name="${esc(d.name)}">Import</button>` : ''}
-              ${hasAll('databases') ? `<button class="btn-sm btn-danger" data-action="drop" data-name="${esc(d.name)}">Drop</button>` : ''}
+              ${d.access === 'edit' && !d.protected ? `<button class="btn-sm" data-action="import" data-name="${esc(d.name)}">Import</button>` : ''}
+              ${hasAll('databases') && !d.protected ? `<button class="btn-sm btn-danger" data-action="drop" data-name="${esc(d.name)}">Drop</button>` : ''}
             </td></tr>`,
           )
           .join('')}
-        ${userDbs.length ? '' : '<tr><td colspan="4" class="empty">No databases yet</td></tr>'}
+        ${userDbs.length ? '' : `<tr><td colspan="4" class="empty">${kind === 'system' ? 'No system databases' : 'No databases yet'}</td></tr>`}
         </tbody></table></div>`;
       const current = select.value;
       select.innerHTML = `<option value="">(no database)</option>${dbs.map((d) => `<option ${d.name === current ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}`;
@@ -243,7 +278,9 @@ function renderMysql(el, server) {
 function renderMongo(el, server) {
   const base = `/servers/${server.id}/mongo`;
   let dbs = [];
-  const canEditDb = (name) => hasAll('databases') || dbs.find((d) => d.name === name)?.access === 'edit';
+  const canEditDb = (name) => !dbs.find((d) => d.name === name)?.protected && (hasAll('databases') || dbs.find((d) => d.name === name)?.access === 'edit');
+  // A collection is editable when its database is, unless it is a MongoDB system collection.
+  const canEditCur = () => canEditDb(current.db) && !current.colProtected && !/^system\./.test(current.collection || '');
   let current = { db: null, collection: null, skip: 0 };
   const apiServices = loadApiServices(server); // to show which collections have APIs
 
@@ -251,11 +288,17 @@ function renderMongo(el, server) {
     <div class="grid" style="grid-template-columns: minmax(240px, 320px) 1fr; align-items:start">
       <div class="card flush">
         <div class="card-head"><h2>Databases</h2>${hasAll('databases') ? '<button class="btn-sm btn-primary" data-action="newDb">+ New</button>' : ''}</div>
+        <div id="kind-pick" class="db-kind-row"></div>
         <div id="tree">${loadingHtml()}</div>
       </div>
       <div id="docs" class="card"><div class="empty">Select a collection to browse its documents.</div></div>
     </div>`;
 
+  el.addEventListener('change', (e) => {
+    if (!e.target.matches('[data-db-kind]')) return;
+    setKind(e.target.value);
+    loadTree();
+  });
   const statusEl = el.querySelector('#mongo-status');
   const treeEl = el.querySelector('#tree');
   const docsEl = el.querySelector('#docs');
@@ -283,13 +326,16 @@ function renderMongo(el, server) {
   async function loadTree() {
     try {
       dbs = await api(`${base}/databases`);
-      treeEl.innerHTML = dbs
+      el.querySelector('#kind-pick').innerHTML = kindPicker(dbs);
+      const kind = shownKind();
+      const shown = dbs.filter((d) => (kind === 'system') === Boolean(d.protected));
+      treeEl.innerHTML = (kind === 'system' ? systemNotice('MongoDB') : '') + (shown.length ? '' : `<div class="empty small">${kind === 'system' ? 'No system databases.' : 'No databases yet.'}</div>`) + shown
         .map(
           (d) => `<div style="border-bottom:1px solid var(--border)">
           <div class="row" style="padding:8px 12px">
             <span class="file-name grow" data-action="openDb" data-db="${esc(d.name)}">⛁ <b>${esc(d.name)}</b></span>
             <span class="small muted">${fmtBytes(d.size)}</span>
-            ${d.system || !hasAll('databases') ? '' : `<button class="btn-sm btn-ghost" title="Drop database" data-action="dropDb" data-db="${esc(d.name)}">✕</button>`}
+            ${d.protected ? lockBadge(d.protected) : !hasAll('databases') ? '' : `<button class="btn-sm btn-ghost" title="Drop database" data-action="dropDb" data-db="${esc(d.name)}">✕</button>`}
             ${d.access === 'view' ? '<span class="badge">view</span>' : ''}
           </div>
           <div data-cols="${esc(d.name)}"></div>
@@ -316,7 +362,7 @@ function renderMongo(el, server) {
       box.innerHTML = `${cols
         .map((c) => {
           const n = apisFor(svcs, db, c.name).length;
-          return `<div class="row" style="padding:4px 12px 4px 32px"><span class="file-name grow" data-action="openCol" data-db="${esc(db)}" data-col="${esc(c.name)}">▤ ${esc(c.name)}</span>${n ? `<span class="badge" title="${n} API(s) use this collection" data-action="openColApis" data-db="${esc(db)}" data-col="${esc(c.name)}">⇄ ${n} API${n === 1 ? '' : 's'}</span>` : ''}<span class="small muted">${c.count ?? ''}</span></div>`;
+          return `<div class="row" style="padding:4px 12px 4px 32px"><span class="file-name grow" data-action="openCol" data-db="${esc(db)}" data-col="${esc(c.name)}" ${c.protected ? 'data-protected="1"' : ''}>▤ ${esc(c.name)}${c.protected && !dbs.find((d) => d.name === db)?.protected ? ' <span title="' + esc(c.protected) + '">🔒</span>' : ''}</span>${n ? `<span class="badge" title="${n} API(s) use this collection" data-action="openColApis" data-db="${esc(db)}" data-col="${esc(c.name)}">⇄ ${n} API${n === 1 ? '' : 's'}</span>` : ''}<span class="small muted">${c.count ?? ''}</span></div>`;
         })
         .join('')}${canEditDb(db) ? `<div class="row" style="padding:4px 12px 8px 32px;gap:6px"><button class="btn-sm" data-action="newCol" data-db="${esc(db)}">+ Collection</button><button class="btn-sm" data-action="importCol" data-db="${esc(db)}" title="Import a collection from a JSON or CSV file">⬆ Import</button></div>` : ''}`;
     } catch (err) {
@@ -328,10 +374,10 @@ function renderMongo(el, server) {
     current.tab = tab;
     docsEl.innerHTML = `
       <div class="row" style="margin-bottom:6px"><h2 class="grow" style="margin:0">${esc(current.db)}.${esc(current.collection)}</h2>
-        ${tab === 'docs' && canEditDb(current.db) ? `<button class="btn-sm" data-action="insert">+ Insert document</button>
+        ${tab === 'docs' && canEditCur() ? `<button class="btn-sm" data-action="insert">+ Insert document</button>
         <button class="btn-sm btn-danger" data-action="dropCol">Drop collection</button>` : ''}
-        ${canEditDb(current.db) ? '' : '<span class="badge">view only</span>'}
-        ${tab === 'docs' && canEditDb(current.db) ? '<button class="btn-sm" data-action="importCol" title="Add documents from a JSON or CSV file">⬆ Import</button>' : ''}
+        ${canEditCur() ? '' : (dbs.find((d) => d.name === current.db)?.protected || current.colProtected) ? '<span class="badge" title="Protected: read-only so nothing critical is changed by accident">🔒 read-only</span>' : '<span class="badge">view only</span>'}
+        ${tab === 'docs' && canEditCur() ? '<button class="btn-sm" data-action="importCol" title="Add documents from a JSON or CSV file">⬆ Import</button>' : ''}
         ${tab === 'docs' ? `<a class="btn btn-sm" href="/api${base}/databases/${encodeURIComponent(current.db)}/collections/${encodeURIComponent(current.collection)}/export" download title="Download all documents as JSON">⬇ Export</a>` : ''}</div>
       <div class="tabs">
         <button class="${tab === 'docs' ? 'active' : ''}" data-action="colTab" data-tab="docs">Documents</button>
@@ -345,7 +391,7 @@ function renderMongo(el, server) {
       const c = docsEl.querySelector('#api-count');
       if (c && n) c.textContent = String(n);
     });
-    if (tab === 'apis') return mountCollectionApis(tabEl, server, current.db, current.collection, canEditDb(current.db), apiServices);
+    if (tab === 'apis') return mountCollectionApis(tabEl, server, current.db, current.collection, canEditCur(), apiServices);
     if (tab === 'connect') return mountConnectGuide(tabEl, server, current.db, current.collection);
     tabEl.innerHTML = `
       <form id="find-form" class="row" style="margin-bottom:10px">
@@ -377,7 +423,7 @@ function renderMongo(el, server) {
           .map(
             (d, i) => `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden">
             <div class="row" style="padding:4px 8px;background:var(--panel-2);justify-content:flex-end">
-              ${canEditDb(current.db) ? `<button class="btn-sm btn-ghost" data-action="editDoc" data-i="${i}">Edit</button>
+              ${canEditCur() ? `<button class="btn-sm btn-ghost" data-action="editDoc" data-i="${i}">Edit</button>
               <button class="btn-sm btn-ghost btn-danger" data-action="deleteDoc" data-i="${i}">Delete</button>` : ''}</div>
             <pre class="mono small" style="margin:0;padding:8px 12px;overflow:auto;max-height:300px">${esc(JSON.stringify(d, null, 2))}</pre></div>`,
           )
@@ -463,8 +509,8 @@ function renderMongo(el, server) {
   onAction(el, {
     importCol: ({ db }) => importDialog(db || current.db, db ? null : current.collection),
     openDb: ({ db }) => openDb(db),
-    openCol: ({ db, col }) => {
-      current = { db, collection: col, skip: 0 };
+    openCol: ({ db, col, protected: prot }) => {
+      current = { db, collection: col, skip: 0, colProtected: Boolean(prot) };
       drawDocsShell();
       loadDocs();
     },

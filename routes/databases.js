@@ -10,6 +10,7 @@ const { parseImport, ParseError } = require('../lib/import-parse');
 const scope = require('../lib/scope');
 
 const { q, HttpError } = ssh;
+const protect = require('../lib/db-protect');
 const router = express.Router({ mergeParams: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1024 * 1024 * 1024 } });
 
@@ -30,6 +31,18 @@ const DB_RULES = [
   ['POST', /^\/mongo\/(insert|update|delete)$/, (m, b) => ['mongo', b.db, 'edit']],
   ['*', /^\/mongo\/users$/, (m, b, method) => (method === 'GET' ? null : ['mongo', b.db, 'edit'])],
 ];
+
+// Serverboy's own team database (logins with password hashes, roles, activity) is for the owner
+// only, even for team members who may use every database.
+router.use((req, res, next) => {
+  if (req.user.isOwner) return next();
+  const team = protect.teamDbName();
+  if (!team) return next();
+  const m = req.path.match(/^\/mongo\/databases\/([^/]+)/);
+  const name = m ? decodeURIComponent(m[1]) : /^\/mongo\/(find|insert|update|delete)$/.test(req.path) ? String(req.body?.db || '') : null;
+  if (name === team) throw new HttpError(403, "This is Serverboy's own database. Only the owner can open it.");
+  next();
+});
 
 router.use((req, res, next) => {
   for (const [method, re, rule] of DB_RULES) {
@@ -55,7 +68,6 @@ function noJsOperators(req, text) {
 
 const IDENT_RE = /^[A-Za-z0-9_]{1,64}$/;
 const MONGO_NAME_RE = /^[A-Za-z0-9_.-]{1,64}$/;
-const SYSTEM_MYSQL_DBS = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 
 function ident(name, what = 'name') {
   if (!IDENT_RE.test(String(name || ''))) throw new HttpError(400, `Invalid ${what}: use letters, numbers and _ only`);
@@ -108,7 +120,10 @@ router.get('/mysql/databases', async (req, res) => {
   res.json(
     rows
       .filter(([name]) => scope.canSeeDb(req.user, req.params.id, 'mysql', name))
-      .map(([name, size, tables]) => ({ name, size: Number(size), tables: Number(tables), system: SYSTEM_MYSQL_DBS.has(name), access: scope.dbLevel(req.user, req.params.id, 'mysql', name) })),
+      .map(([name, size, tables]) => {
+        const p = protect.classify('mysql', name);
+        return { name, size: Number(size), tables: Number(tables), system: Boolean(p), protected: p, access: scope.dbLevel(req.user, req.params.id, 'mysql', name) };
+      }),
   );
 });
 
@@ -139,7 +154,7 @@ GRANT ALL PRIVILEGES ON \`${name}\`.* TO ${sqlString(user)}@'localhost'; FLUSH P
 
 router.delete('/mysql/databases/:name', async (req, res) => {
   const name = ident(req.params.name, 'database name');
-  if (SYSTEM_MYSQL_DBS.has(name)) throw new HttpError(400, 'Refusing to drop a system database');
+  protect.assertWritable('mysql', name);
   await mysql(req.params.id, `DROP DATABASE \`${name}\`;`);
   res.json({ ok: true });
 });
@@ -208,6 +223,7 @@ router.get('/mysql/databases/:name/export', async (req, res) => {
 
 router.post('/mysql/databases/:name/import', upload.single('file'), async (req, res) => {
   const name = ident(req.params.name, 'database name');
+  protect.assertWritable('mysql', name);
   if (!req.file) throw new HttpError(400, 'Choose a .sql or .sql.gz file');
   const tmp = `/tmp/.serverboy-import-${crypto.randomBytes(6).toString('hex')}`;
   const s = await ssh.sftp(req.params.id);
@@ -258,13 +274,17 @@ router.get('/mongo/databases', async (req, res) => {
   res.json(
     result
       .filter((d) => scope.canSeeDb(req.user, req.params.id, 'mongo', d.name))
-      .map((d) => ({ name: d.name, size: d.sizeOnDisk, system: ['admin', 'local', 'config'].includes(d.name), access: scope.dbLevel(req.user, req.params.id, 'mongo', d.name) })),
+      .filter((d) => req.user.isOwner || d.name !== protect.teamDbName())
+      .map((d) => {
+        const p = protect.classify('mongo', d.name);
+        return { name: d.name, size: d.sizeOnDisk, system: Boolean(p), protected: p, access: scope.dbLevel(req.user, req.params.id, 'mongo', d.name) };
+      }),
   );
 });
 
 router.delete('/mongo/databases/:db', async (req, res) => {
   const dbName = mongoName(req.params.db, 'database name');
-  if (['admin', 'local', 'config'].includes(dbName)) throw new HttpError(400, 'Refusing to drop a system database');
+  protect.assertWritable('mongo', dbName);
   await mongosh(req.params.id, `out(db.getSiblingDB(${JSON.stringify(dbName)}).dropDatabase());`);
   res.json({ ok: true });
 });
@@ -280,12 +300,14 @@ out(d.getCollectionInfos({}, { nameOnly: true }).map((c) => {
   return { name: c.name, type: c.type, count };
 }));`,
   );
-  res.json(result);
+  const dbProtected = protect.classify('mongo', dbName);
+  res.json(result.map((c) => ({ ...c, protected: dbProtected ? dbProtected.reason : protect.collectionReason(c.name) })));
 });
 
 router.post('/mongo/databases/:db/collections', async (req, res) => {
   const dbName = mongoName(req.params.db, 'database name');
   const col = mongoName(req.body?.name, 'collection name');
+  protect.assertWritable('mongo', dbName, col);
   await mongosh(req.params.id, `out(db.getSiblingDB(${JSON.stringify(dbName)}).createCollection(${JSON.stringify(col)}));`);
   res.json({ ok: true });
 });
@@ -293,6 +315,7 @@ router.post('/mongo/databases/:db/collections', async (req, res) => {
 router.delete('/mongo/databases/:db/collections/:col', async (req, res) => {
   const dbName = mongoName(req.params.db, 'database name');
   const col = mongoName(req.params.col, 'collection name');
+  protect.assertWritable('mongo', dbName, col);
   await mongosh(req.params.id, `out(db.getSiblingDB(${JSON.stringify(dbName)}).getCollection(${JSON.stringify(col)}).drop());`);
   res.json({ ok: true });
 });
@@ -307,6 +330,7 @@ const IMPORT_MAX = 200 * 1024 * 1024;
 // document per line, readable only by the SSH user) and a preview is returned.
 router.post('/mongo/databases/:db/import/prepare', upload.single('file'), async (req, res) => {
   const dbName = mongoName(req.params.db, 'database name');
+  protect.assertWritable('mongo', dbName, req.body?.collection);
   if (!req.file) throw new HttpError(400, 'Choose a .json, .ndjson or .csv file');
   if (req.file.size > IMPORT_MAX) throw new HttpError(400, 'The file is larger than 200 MB. Use mongoimport in the terminal for very large files.');
   let parsed;
@@ -336,6 +360,7 @@ out(d.getCollectionInfos({}, { nameOnly: true }).map((c) => ({ name: c.name, cou
 router.post('/mongo/databases/:db/import', async (req, res) => {
   const dbName = mongoName(req.params.db, 'database name');
   const col = mongoName(req.body?.collection, 'collection name');
+  protect.assertWritable('mongo', dbName, col);
   const p = pendingImports.get(String(req.body?.token || ''));
   if (!p || p.serverId !== req.params.id || p.db !== dbName || p.user !== req.user.username) throw new HttpError(400, 'This upload has expired. Choose the file again.');
   pendingImports.delete(req.body.token);
@@ -385,6 +410,12 @@ print(']');`;
   res.on('close', () => stream.close());
 });
 
+// Same, for changes: refuses protected databases and system collections.
+function writableCollectionRef(body) {
+  protect.assertWritable('mongo', mongoName(body?.db, 'database name'), mongoName(body?.collection, 'collection name'));
+  return collectionRef(body);
+}
+
 function collectionRef(body) {
   const dbName = mongoName(body?.db, 'database name');
   const col = mongoName(body?.collection, 'collection name');
@@ -412,13 +443,13 @@ out({ total: c.countDocuments(filter), docs: c.find(filter).sort(${ejson(req.bod
 });
 
 router.post('/mongo/insert', async (req, res) => {
-  const coll = collectionRef(req.body);
+  const coll = writableCollectionRef(req.body);
   const result = await mongosh(req.params.id, `out(${coll}.insertOne(${ejson(req.body?.document)}));`);
   res.json(result);
 });
 
 router.post('/mongo/update', async (req, res) => {
-  const coll = collectionRef(req.body);
+  const coll = writableCollectionRef(req.body);
   const result = await mongosh(
     req.params.id,
     `const doc = ${ejson(req.body?.document)};
@@ -429,7 +460,7 @@ out(${coll}.replaceOne({ _id: doc._id }, doc));`,
 
 router.post('/mongo/delete', async (req, res) => {
   noJsOperators(req, req.body?.filter);
-  const coll = collectionRef(req.body);
+  const coll = writableCollectionRef(req.body);
   const filterText = String(req.body?.filter || '').trim();
   if (!filterText || filterText === '{}') throw new HttpError(400, 'A filter is required to delete documents');
   const result = await mongosh(req.params.id, `out(${coll}.${req.body?.many ? 'deleteMany' : 'deleteOne'}(${ejson(filterText)}));`);
