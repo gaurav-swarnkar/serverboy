@@ -43,7 +43,7 @@ Shipped in v1.4.0 (Backups page) and v1.5.0 (test-restores, Serverboy backup). N
 - [ ] **P0 Security headers everywhere.** Done when: CSP, HSTS (when HTTPS), X-Frame-Options/frame-ancestors, Referrer-Policy and nosniff are verified on every response by an automated test.
 - [ ] **P0 Path and command-injection review.** Done when: every place that builds a shell command (`ssh.exec`, `q()`) or a file path is reviewed and has tests with hostile input (`;`, `$()`, `../`, newlines, unicode).
 - [ ] **P1 Request limits.** Done when: rate limits apply to the API in general, not only to login. The 20 MB JSON limit is reviewed per route, and upload size limits apply per user.
-- [ ] **P1 Dependency audit in CI.** Done when: `npm audit` and GitHub Dependabot run on every push. Updates to vendored assets (Swagger UI, xterm, Inter) are tracked.
+- [x] **P1 Dependency audit in CI.** Done when: `npm audit` and GitHub Dependabot run on every push. Updates to vendored assets (Swagger UI, xterm, Inter) are tracked.
 - [ ] **P1 Outside review.** Done when: someone other than the author has run a pentest or security review, and there is a short `SECURITY.md` with how to report issues.
 - [ ] **P2 Panel behind an allowlist.** Done when: there is an optional IP allowlist or Cloudflare Access / Tailscale mode for the portal itself.
 
@@ -71,9 +71,11 @@ Shipped in v1.4.0 (Backups page) and v1.5.0 (test-restores, Serverboy backup). N
 
 ## 5. Reliability of Serverboy itself
 
-- [ ] **P0 Automated tests.** Done when: there are unit tests for `lib/` (auth, scope, permissions, nginx config writer, import parser, openapi) and API tests for every route's permission checks, and they run on every push. Today there is no test suite.
-- [ ] **P0 CI pipeline.** Done when: GitHub Actions runs lint, tests and a smoke test that installs into a fresh Ubuntu container.
-- [ ] **P0 Releases instead of a branch.** Done when: installs and updates pull a tagged version (`v1.4.0`), not a development branch. The install script has a `--version` flag, and a bad release can be rolled back.
+Shipped in v1.6.0: 56 automated tests, GitHub Actions CI (Node 20/22/24, MongoDB, audit, real Ubuntu install) and tagged releases. Still open: safe self-update with automatic rollback.
+
+- [x] **P0 Automated tests.** Done when: there are unit tests for `lib/` (auth, scope, permissions, nginx config writer, import parser, openapi) and API tests for every route's permission checks, and they run on every push. Today there is no test suite.
+- [x] **P0 CI pipeline.** Done when: GitHub Actions runs lint, tests and a smoke test that installs into a fresh Ubuntu container.
+- [x] **P0 Releases instead of a branch.** Done when: installs and updates pull a tagged version (`v1.4.0`), not a development branch. The install script has a `--version` flag, and a bad release can be rolled back.
 - [ ] **P1 Safe self-update.** Done when: Update in the UI downloads the new version, runs a health check, and switches back automatically if Serverboy doesn't start.
 - [ ] **P1 Failure handling.** Done when: SSH drops, Mongo down, a full disk and a sudo password prompt each show a clear message and never hang a request. Each case has a test.
 - [ ] **P1 Job safety.** Done when: long jobs (installs, imports, certbot) survive a browser refresh. A Serverboy restart marks running jobs as interrupted.
