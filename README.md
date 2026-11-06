@@ -209,7 +209,7 @@ TEST_MONGODB_URI=mongodb://127.0.0.1:27017 npm test   # also the Data API engine
 
 Tests use Node's built-in test runner (no extra dependencies) and live in `test/`. Every push and pull request runs **GitHub Actions** (`.github/workflows/ci.yml`):
 
-1. syntax check and all tests on Node 20 and 22, with a real MongoDB;
+1. syntax check and all tests on Node 20, 22 and 24, with a real MongoDB;
 2. `npm audit` of the production dependencies;
 3. a full install on a fresh Ubuntu 24.04 machine with the real installer, a login check, and a second run to prove updates keep the data.
 
