@@ -4,6 +4,7 @@
 //   GET    /backups/inventory        what can be backed up (databases, folders, free space)
 //   POST   /backups/test-storage     check cloud storage with the given (or saved) settings
 //   POST   /backups/run              back up now
+//   POST   /backups/drill            test-restore the newest backup into temporary databases
 //   GET    /backups/list             backups on the server and in cloud storage
 //   POST   /backups/:bid/restore     restore chosen items
 //   DELETE /backups/:bid             delete (?where=server|cloud|both)
@@ -28,6 +29,8 @@ router.put('/backups/settings', (req, res) => {
 router.get('/backups/inventory', async (req, res) => res.json(await backups.inventory(req.params.id)));
 
 router.post('/backups/test-storage', async (req, res) => res.json(await backups.testRemote(req.params.id, req.body?.remote)));
+
+router.post('/backups/drill', (req, res) => res.json(backups.startDrill(req.params.id, { reason: 'manual', user: req.user.username, backupId: req.body?.backupId || null })));
 
 router.post('/backups/run', (req, res) => res.json(backups.startBackup(req.params.id, { reason: 'manual', user: req.user.username })));
 

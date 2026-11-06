@@ -1,10 +1,12 @@
 import { api, esc, run, toast, confirmDialog, onAction, loadingHtml, errorHtml, fmtDate } from '../ui.js';
 import { check as checkUpdates } from '../updates.js';
 import { adminHead, changeConnection, requireTeamDb } from './admin-common.js';
+import { mountSelfBackup } from './serverboy-backup.js';
 
 export async function render(el, { servers }) {
-  el.innerHTML = `${adminHead('Settings', 'Where team accounts are stored, updates and messages to the team, and how the owner login works.')}<div id="db"></div>
+  el.innerHTML = `${adminHead('Settings', 'Where team accounts are stored, updates and messages to the team, backups of Serverboy itself, and how the owner login works.')}<div id="db"></div>
     <div id="updates" style="margin-top:16px"></div>
+    <div id="sbbackup" style="margin-top:16px"></div>
     <div class="card" style="margin-top:16px;max-width:780px">
       <h2>Owner login</h2>
       <p class="muted" style="margin-top:0">You log in as <b>admin</b>. This login is stored by Serverboy itself, not in MongoDB, so it keeps working even if the database is down.</p>
@@ -14,6 +16,7 @@ export async function render(el, { servers }) {
       </ul>
     </div>`;
   const db = el.querySelector('#db');
+  mountSelfBackup(el.querySelector('#sbbackup'));
 
   async function load() {
     db.innerHTML = loadingHtml();

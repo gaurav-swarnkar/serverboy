@@ -64,6 +64,8 @@ api.get('/version', async (req, res) => {
 api.use(people);
 api.use(require('./routes/servers'));
 api.use(require('./routes/team'));
+api.use(require('./routes/serverboy-backup'));
+require('./lib/self-backup').startScheduler();
 
 const perServer = express.Router({ mergeParams: true });
 perServer.use((req, res, next) => {

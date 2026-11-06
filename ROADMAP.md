@@ -13,15 +13,15 @@ Each item says what "done" means, so it can be tested.
 
 ## 1. Data safety (backups and recovery)
 
-Shipped in v1.4.0 (Backups page). Not done yet: Serverboy's own data, restore drills, snapshots before changes.
+Shipped in v1.4.0 (Backups page) and v1.5.0 (test-restores, Serverboy backup). Not done yet: snapshots before risky changes.
 
 - [x] **P0 Scheduled MongoDB backups.** Done when: `mongodump` runs nightly per database, gzip, kept 7 daily + 4 weekly, size and result shown in a Backups page.
 - [x] **P0 Off-server copies.** Done when: backups upload to Azure Blob / S3 / Backblaze. A backup kept only on the same disk is lost with the VM.
 - [x] **P0 One-click restore.** Done when: you can restore a database, or a single collection, to the same or a new name. Tested on a real dump.
 - [x] **P0 Website and app files backup.** Done when: `/var/www/*`, Nginx site configs and PM2 app settings are in the same schedule.
-- [ ] **P1 Backup of Serverboy itself.** Done when: `data/` (servers, encrypted secrets, sessions, settings) can be exported and imported, with a clear warning that it holds secrets.
+- [x] **P1 Backup of Serverboy itself.** Done when: `data/` (servers, encrypted secrets, sessions, settings) can be exported and imported, with a clear warning that it holds secrets.
 - [x] **P1 Backup alerts.** Done when: a failed or missing backup shows on the dashboard and sends an alert (see section 3).
-- [ ] **P1 Restore drill.** Done when: a monthly test-restore runs automatically into a scratch database and reports the result.
+- [x] **P1 Restore drill.** Done when: a monthly test-restore runs automatically into a scratch database and reports the result.
 - [ ] **P2 Before-change snapshots.** Done when: deleting a database or collection, or "Update engine", takes an automatic dump first. Engine updates already keep a `.bak-v2` config.
 
 ## 2. Security

@@ -20,7 +20,7 @@ const pill = (status) => `<span class="badge ${STATUS[status]?.[0] || ''}">${STA
 export async function render(el, { server }) {
   const base = `/servers/${server.id}/backups`;
   el.innerHTML = `<div class="page-head"><div><h1>Backups</h1><div class="sub">Copies of your databases, website folders and server settings, made on a schedule. Restore any of them in a few clicks.</div></div>
-    <div class="row"><button class="btn" data-action="settings">Settings</button><button class="btn-primary" data-action="now">Back up now</button></div></div>
+    <div class="row"><button class="btn" data-action="settings">Settings</button><button class="btn" data-action="drill" title="Restore the newest backup into temporary databases to prove it works. Nothing live is touched.">Test a restore</button><button class="btn-primary" data-action="now">Back up now</button></div></div>
     <div id="bk-status">${loadingHtml()}</div>
     <div id="bk-settings" class="hidden"></div>
     <div id="bk-list"></div>`;
@@ -66,9 +66,24 @@ export async function render(el, { server }) {
           <div class="small muted">Keeps the last ${info.keepLocal} on the server${info.remote.type === 'none' ? '' : ` and ${info.keepRemote} in the cloud`}</div>
           ${info.remote.type === 'none' ? '<div class="small" style="color:var(--warn);margin-top:6px">If the server is lost, its backups are lost too. Add cloud storage in Settings.</div>' : ''}
         </div>
+        ${drillCard(info)}
       </div>`;
     clearTimeout(poll);
     if (info.state.running && alive) poll = setTimeout(() => refresh(), 5000);
+  }
+
+  // Last automatic or manual test-restore: proof that the backups really work.
+  function drillCard(i) {
+    const d = i.state.lastDrill;
+    const plan = i.drill === 'off' ? 'Automatic tests are off.' : `Tested automatically every ${i.drill} after a scheduled backup.`;
+    if (!d) return `<div class="card"><div class="small muted">Last test-restore</div><h3 style="margin:6px 0">Never tested</h3><div class="small muted">${plan} A backup you have never restored may not work when you need it.</div></div>`;
+    const okItems = (d.items || []).filter((x) => x.ok);
+    return `<div class="card"><div class="small muted">Last test-restore</div>
+      <h3 style="margin:6px 0">${ago(d.at)} ${d.status === 'success' ? '<span class="badge ok">worked</span>' : '<span class="badge bad">failed</span>'}</h3>
+      <div class="small muted">Backup ${d.backupId ? when(`${d.backupId.slice(0, 4)}-${d.backupId.slice(4, 6)}-${d.backupId.slice(6, 8)}T${d.backupId.slice(9, 11)}:${d.backupId.slice(11, 13)}:00Z`) : '?'} from the ${d.source === 'cloud' ? 'cloud copy' : 'server copy'} · ${okItems.length} of ${(d.items || []).length} item(s) restored · ${d.seconds}s</div>
+      ${d.error ? `<div class="small" style="color:var(--bad);margin-top:6px">${esc(d.error)}</div>` : ''}
+      <div class="small muted" style="margin-top:4px">${plan}</div>
+      ${d.job ? `<button class="btn-sm btn-ghost" style="margin-top:6px" data-action="job" data-id="${esc(d.job)}">Details</button>` : ''}</div>`;
   }
 
   async function loadList() {
@@ -159,13 +174,16 @@ export async function render(el, { server }) {
           <h4>Keep</h4>
           <div class="row" style="gap:8px;flex-wrap:wrap"><label class="field" style="flex:1;min-width:140px"><span>On the server</span><input name="keepLocal" type="number" min="1" max="90" value="${s.keepLocal}"><small>newest backups</small></label>
           <label class="field" style="flex:1;min-width:140px"><span>In the cloud</span><input name="keepRemote" type="number" min="1" max="365" value="${s.keepRemote}"><small>newest backups</small></label></div>
+          <h4>Test-restore</h4>
+          <label class="field"><span>Prove the backups work</span><select name="drill">${[['week', 'Every week (recommended)'], ['month', 'Every month'], ['off', 'Off']].map(([v, l]) => `<option value="${v}" ${s.drill === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            <small>After a scheduled backup, Serverboy restores it into temporary databases (from the cloud copy if there is one), checks the data can be read, then deletes them. Your live data is never touched.</small></label>
         </div>
         <div>
           <h4>What</h4>
           <label class="check"><input type="checkbox" name="mongo" ${inc.mongo ? 'checked' : ''}> <b>MongoDB databases</b></label>
           <div class="bk-sub">${inv.mongoError ? `<div class="small" style="color:var(--warn)">Could not list MongoDB: ${esc(inv.mongoError)}</div>` : listPick('mongo', inv.mongo, inc.mongoDbs, 'databases')}${inv.mongo && !inv.mongodump ? '<div class="small" style="color:var(--bad)">mongodump is missing: install the MongoDB database tools.</div>' : ''}</div>
           <label class="check"><input type="checkbox" name="mysql" ${inc.mysql ? 'checked' : ''}> <b>MySQL / MariaDB databases</b></label>
-          <div class="bk-sub">${listPick('mysql', inv.mysql, inc.mysqlDbs, 'databases')}</div>
+          <div class="bk-sub">${inv.mysqlError ? `<div class="small" style="color:var(--warn)">MySQL is installed but not answering, so it cannot be backed up: ${esc(inv.mysqlError)}. Start it under Services.</div>` : listPick('mysql', inv.mysql, inc.mysqlDbs, 'databases')}</div>
           <label class="check"><input type="checkbox" name="files" ${inc.files ? 'checked' : ''}> <b>Website and app folders</b> <span class="muted small">(/var/www)</span></label>
           <div class="bk-sub">${listPick('files', inv.files, inc.fileDirs, 'folders')}
             <label class="check small"><input type="checkbox" name="skipNodeModules" ${inc.skipNodeModules ? 'checked' : ''}> Skip node_modules (re-installed on deploy; saves a lot of space)</label></div>
@@ -245,6 +263,7 @@ export async function render(el, { server }) {
       include: { mongo: f.mongo.checked, mongoDbs: chosen('mongo'), mysql: f.mysql.checked, mysqlDbs: chosen('mysql'), files: f.files.checked, fileDirs: chosen('files'), skipNodeModules: f.skipNodeModules.checked, settings: f.settings.checked },
       keepLocal: Number(f.keepLocal.value),
       keepRemote: Number(f.keepRemote.value),
+      drill: f.drill.value,
       remote: remoteFromForm(f),
     };
     if (!body.include.mongo && !body.include.mysql && !body.include.files && !body.include.settings) {
@@ -303,6 +322,13 @@ export async function render(el, { server }) {
   }
 
   onAction(el, {
+    drill: async (d, btn) => {
+      const job = await run(btn, () => api(`${base}/drill`, { method: 'POST', body: {} }));
+      if (job) {
+        showJob(server.id, job, { onDone: refresh });
+        refresh();
+      }
+    },
     now: async (d, btn) => {
       const job = await run(btn, () => api(`${base}/run`, { method: 'POST' }));
       if (job) {
