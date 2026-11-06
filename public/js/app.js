@@ -30,6 +30,7 @@ const views = {
   nodeapps: () => import('./views/nodeapps.js'),
   firewall: () => import('./views/firewall.js'),
   jobs: () => import('./views/jobs.js'),
+  backups: () => import('./views/backups.js'),
 };
 
 // Permission each page needs (null = anyone logged in). The server enforces the same rules.
@@ -54,13 +55,14 @@ const VIEW_PERMISSION = {
   apis: 'databases',
   firewall: 'system',
   jobs: null,
+  backups: 'owner',
 };
 
 const SERVER_NAV = [
   ['Main menu', [['dashboard', 'home', 'Dashboard'], ['terminal', 'terminal', 'Terminal'], ['files', 'folder', 'File Manager']]],
   ['Hosting', [['sites', 'globe', 'Websites'], ['nodeapps', 'hexagon', 'Node Apps'], ['databases', 'database', 'Databases'], ['apis', 'plug', 'APIs']]],
   ['Software', [['apps', 'package', 'App Store'], ['services', 'sliders', 'Services'], ['storage', 'drive', 'Disk & cleanup']]],
-  ['Security', [['firewall', 'shield', 'Firewall'], ['jobs', 'list', 'Tasks']]],
+  ['Security', [['backups', 'archive', 'Backups'], ['firewall', 'shield', 'Firewall'], ['jobs', 'list', 'Tasks']]],
 ];
 
 const PORTAL_NAV = [
@@ -91,6 +93,7 @@ const PAGE_INFO = {
   apis: ['APIs', 'Let websites and apps use your data, safely.'],
   firewall: ['Firewall', 'Choose which ports the internet can reach.'],
   jobs: ['Tasks', 'Live logs of installs and deployments.'],
+  backups: ['Backups', 'Automatic copies of your data, with one-click restore.'],
   servers: ['Servers', 'All the servers you manage with Serverboy.'],
   people: ['Team', 'Everyone who works on these servers.'],
   messages: ['Messages', 'Talk to your team.'],

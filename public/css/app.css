@@ -635,3 +635,15 @@ td.actions > button, td.actions > .btn, td.actions > .badge { margin: 2px 0 2px 
 body.viewing-as .sidebar { top: 42px; height: calc(100vh - 42px); }
 body.viewing-as .layout { min-height: calc(100vh - 42px); }
 body.viewing-as .topbar { top: 42px; }
+
+/* Backups */
+.bk-cards { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.bk-cards h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#bk-form h4 { margin: 14px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.bk-sub { margin: 4px 0 12px 26px; display: flex; flex-direction: column; gap: 4px; }
+.bk-pick { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow: auto; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; margin-left: 24px; }
+.chip { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); font-size: 12px; margin: 1px 2px 1px 0; white-space: nowrap; }
+.bk-restore-row select, .bk-restore-row input { width: auto; }
+.bk-restore-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.bk-restore-row:last-child { border-bottom: 0; }
+.bk-hint { display: block; margin-left: 26px; margin-top: -2px; }

@@ -80,6 +80,8 @@ perServer.use(require('./routes/databases'));
 perServer.use(require('./routes/dataapi'));
 perServer.use(require('./routes/sites'));
 perServer.use(require('./routes/nodeapps'));
+perServer.use(require('./routes/backups'));
+require('./lib/backups').startScheduler();
 api.use('/servers/:id', perServer);
 app.use('/api', api);
 
@@ -96,7 +98,7 @@ app.use((err, req, res, next) => {
 // Record every change (and every download) in the team activity log. Request bodies are never
 // logged because they can contain passwords.
 function auditLog(req, res, next) {
-  const isDownload = /\/(files\/download|export)$/.test(req.path);
+  const isDownload = /\/(files\/download|export)$|\/backups\/[^/]+\/download\//.test(req.path);
   // Team routes write their own, more readable entries ("Created user ravi").
   if ((req.method === 'GET' && !isDownload) || req.path.startsWith('/team')) return next();
   res.on('finish', () => {

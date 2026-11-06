@@ -107,6 +107,7 @@ export function mountHealth(el, server, { onData } = {}) {
     if (p.area === 'service' && can('services')) return `<button class="btn-sm" data-action="hc-diagnose" data-unit="${esc(p.target)}">Diagnose</button>`;
     if (p.area === 'site' && p.target === 'nginx' && can('services')) return '<button class="btn-sm" data-action="hc-diagnose" data-unit="nginx">Diagnose</button>';
     if (p.area === 'site' && can('sites')) return `<a class="btn btn-sm" href="#/s/${server.id}/sites">Websites</a>`;
+    if (p.area === 'backup' && can('owner')) return `<a class="btn btn-sm" href="#/s/${server.id}/backups">Backups</a>`;
     if (p.area === 'app' && can('nodeapps')) return `<a class="btn btn-sm" href="#/s/${server.id}/nodeapps">Node Apps</a>`;
     if (p.fix && can('system')) return `<button class="btn-sm" data-action="hc-fix" data-fix="${p.fix}">${p.fix === 'cleanup' ? 'Free space' : 'Add swap'}</button>`;
     return '';
