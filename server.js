@@ -16,12 +16,20 @@ store.initAdminPassword();
 
 const app = express();
 app.disable('x-powered-by');
-if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY);
+// TRUST_PROXY=1 (set by the installer, Nginx in front): trust one proxy hop. Express reads a
+// string as an IP address, so numbers and true/false must be converted first; otherwise every
+// visitor looks like 127.0.0.1 (one lockout would block everyone, logs show the wrong IP).
+if (process.env.TRUST_PROXY) {
+  const t = process.env.TRUST_PROXY.trim();
+  app.set('trust proxy', /^\d+$/.test(t) ? Number(t) : t === 'true' ? true : t === 'false' ? false : t);
+}
 
 app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
+  // Behind HTTPS (Nginx + certbot), tell browsers to always use HTTPS for this address.
+  if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
   // Lets open browser tabs notice that Serverboy was updated (public/js/updates.js).
   res.setHeader('X-Serverboy-Build', version.build);
   res.setHeader(
@@ -53,6 +61,7 @@ api.use((req, res, next) => {
   if (b && /^[0-9a-f]{12}$/.test(b)) clients.set(req.user.username, { username: req.user.username, name: req.user.name || req.user.username, build: b, at: Date.now() });
   next();
 });
+api.get('/updates', auth.requirePermission('owner'), async (req, res) => res.json(await version.updateInfo()));
 api.get('/team/clients', auth.requirePermission('owner'), (req, res) => {
   const since = Date.now() - 24 * 3600 * 1000;
   res.json({ build: version.build, clients: [...clients.values()].filter((c) => c.at > since).sort((a, b) => b.at - a.at) });

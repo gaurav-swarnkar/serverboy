@@ -3,11 +3,17 @@
 # (Nginx + Let's Encrypt) so you can open it from your phone anywhere.
 #
 # One command, no domain needed (uses a free <ip>.sslip.io address):
-#   curl -fsSL https://raw.githubusercontent.com/gaurav-swarnkar/serverboy/ccr-af56e66b-azkhkc/scripts/install-on-server.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/gaurav-swarnkar/serverboy/HEAD/scripts/install-on-server.sh | sudo bash
 #
 # Or from a checkout:   sudo bash scripts/install-on-server.sh [domain|auto|none] [email]
 #   auto (default)  use <public-ip>.sslip.io, which needs no DNS setup
 #   none            only listen on 127.0.0.1 (reach it through an SSH tunnel)
+#
+# Which version (when run through curl | bash; your data is always kept):
+#   SERVERBOY_VERSION=latest   the newest published release (default)
+#   SERVERBOY_VERSION=v1.5.0   that release, e.g. to go back after a bad update
+#   SERVERBOY_VERSION=edge     the newest development code (or any branch name)
+#   e.g.  curl -fsSL …/install-on-server.sh | sudo SERVERBOY_VERSION=v1.5.0 bash
 # Private repo: set SERVERBOY_REPO=https://<token>@github.com/gaurav-swarnkar/serverboy.git
 set -euo pipefail
 
@@ -32,11 +38,31 @@ else
   command -v git >/dev/null || { apt-get update -y && apt-get install -y git; }
   SRC_DIR="$(mktemp -d)"
   trap 'rm -rf "$SRC_DIR"' EXIT
-  if ! GIT_TERMINAL_PROMPT=0 git clone -q --depth 1 "$REPO" "$SRC_DIR"; then
-    echo "Could not download $REPO."
+  # Pick the version: the latest GitHub release unless SERVERBOY_VERSION says otherwise.
+  WANT="${SERVERBOY_VERSION:-latest}"
+  REF=""
+  if [ "$WANT" = "latest" ]; then
+    SLUG="$(printf '%s' "$REPO" | sed -E 's#^https://([^@/]*@)?github\.com/##; s#\.git$##')"
+    REF="$(curl -fsSL -m 15 "https://api.github.com/repos/$SLUG/releases/latest" 2>/dev/null | tr -d '\n' | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' || true)"
+    if [ -z "$REF" ]; then echo "    No published release found; installing the latest development version."; fi
+  elif [ "$WANT" != "edge" ]; then
+    REF="$WANT"
+  fi
+  echo "    Version: ${REF:-development (default branch)}"
+  if ! GIT_TERMINAL_PROMPT=0 git clone -q --depth 1 ${REF:+--branch "$REF"} "$REPO" "$SRC_DIR"; then
+    echo "Could not download ${REF:-the code} from $REPO."
+    [ -n "$REF" ] && echo "Check that the version exists (see the Releases page on GitHub)."
     echo "If the repository is private, make it public or set SERVERBOY_REPO with a token (see README)."
     exit 1
   fi
+fi
+# Remember what is installed (shown in Administration → Settings → Updates).
+INSTALLED_REF="$( (cd "$SRC_DIR" && git describe --tags --exact-match 2>/dev/null) || (cd "$SRC_DIR" && git rev-parse --abbrev-ref HEAD 2>/dev/null) || echo unknown)"
+INSTALLED_COMMIT="$( (cd "$SRC_DIR" && git rev-parse --short HEAD 2>/dev/null) || echo unknown)"
+# Re-running the installed copy (/opt/serverboy, no .git): keep what was recorded before.
+if [ "$INSTALLED_REF" = "unknown" ] && [ -f "$SRC_DIR/RELEASE" ]; then
+  INSTALLED_REF="$(sed -n 's/^ref=//p' "$SRC_DIR/RELEASE")"
+  INSTALLED_COMMIT="$(sed -n 's/^commit=//p' "$SRC_DIR/RELEASE")"
 fi
 
 if [ "$DOMAIN" = "auto" ]; then
@@ -66,6 +92,7 @@ id serverboy >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr
 mkdir -p "$APP_DIR" "$DATA_DIR"
 rsync -a --delete --exclude node_modules --exclude data --exclude .git --exclude .env "$SRC_DIR/" "$APP_DIR/"
 (cd "$APP_DIR" && npm ci --omit=dev --no-audit --no-fund)
+printf 'ref=%s\ncommit=%s\ninstalledAt=%s\n' "$INSTALLED_REF" "$INSTALLED_COMMIT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$APP_DIR/RELEASE"
 chown -R root:root "$APP_DIR"
 # The service user must be able to read the code (a mktemp source dir is 0700).
 chmod -R u=rwX,go=rX "$APP_DIR"
@@ -153,7 +180,7 @@ fi
 
 echo
 echo "=================================================================="
-echo " Serverboy is installed and running (systemctl status serverboy)"
+echo " Serverboy $INSTALLED_REF ($INSTALLED_COMMIT) is installed and running (systemctl status serverboy)"
 if [ -n "$DOMAIN" ] && [ "$HTTPS_OK" = 1 ]; then
   echo " Open on any device:  https://$DOMAIN"
 elif [ -n "$DOMAIN" ]; then

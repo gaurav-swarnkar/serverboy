@@ -68,6 +68,7 @@ export async function render(el, { servers }) {
         <h2>Updates and team message</h2>
         <table class="small"><tbody>
           <tr><td class="muted" style="width:170px">Running version</td><td><b>${esc(v.version)}</b> <span class="mono muted">build ${esc(v.build)}</span> · started ${fmtDate(v.startedAt)}</td></tr>
+          <tr><td class="muted">Newest release</td><td id="rel-check" class="muted">Checking GitHub…</td></tr>
           <tr><td class="muted">Open in browsers (24 h)</td><td>${
             c.clients.length
               ? c.clients
@@ -94,6 +95,24 @@ export async function render(el, { servers }) {
         </form>
         <p class="small muted" style="margin-bottom:0">Each person can dismiss it; a new message shows again.</p>
       </div>`;
+    // Is there a newer release? (checked by the server, cached for an hour)
+    api('/updates')
+      .then((u) => {
+        const cell = upd.querySelector('#rel-check');
+        if (!cell) return;
+        const where = u.installed ? `Installed from ${u.channel === 'release' ? `release <b>${esc(u.installed.ref)}</b>` : `the development version (<span class="mono">${esc(u.installed.ref)} ${esc(u.installed.commit || '')}</span>)`}` : '';
+        if (u.latest?.error) cell.innerHTML = `${esc(u.latest.error)}${where ? `<br>${where}` : ''}`;
+        else if (u.latest?.none) cell.innerHTML = `No release published yet.${where ? `<br>${where}` : ''}`;
+        else if (u.updateAvailable)
+          cell.innerHTML = `<span class="badge warn">update available</span> <b>${esc(u.latest.tag)}</b> · <a href="${esc(u.latest.url)}" target="_blank" rel="noopener">what's new</a>
+            <div style="margin-top:6px">Run this on the server (your data is kept):</div><pre class="log" style="white-space:pre-wrap">${esc(u.command)}</pre>${where}`;
+        else cell.innerHTML = `<span class="badge ok">up to date</span> ${esc(u.latest.tag)}${where ? `<br>${where}` : ''}`;
+        cell.classList.remove('muted');
+      })
+      .catch((err) => {
+        const cell = upd.querySelector('#rel-check');
+        if (cell) cell.textContent = err.message;
+      });
     upd.querySelector('#msg-form').addEventListener('submit', async (e) => {
       const f = e.target;
       const r = await run(f.querySelector('button.btn-primary'), () =>

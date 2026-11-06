@@ -62,7 +62,7 @@ It prints a line like `On your phone (same Wi-Fi), open: http://192.168.1.20:300
 1. In the Azure Portal (portal.azure.com in your phone's browser, or the Azure app), open your VM → **Networking** → add inbound port rules for **80** and **443**.
 2. Open your VM → **Run command** → **RunShellScript**, paste this, and tap **Run**:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/gaurav-swarnkar/serverboy/ccr-af56e66b-azkhkc/scripts/install-on-server.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/gaurav-swarnkar/serverboy/HEAD/scripts/install-on-server.sh | bash
    ```
    (Or run it with `sudo` from any SSH app, such as Termius.) It takes a few minutes. It installs Node.js, runs Serverboy as a `serverboy` systemd service on `127.0.0.1:3000`, puts Nginx in front of it, and gets a free Let's Encrypt certificate.
 3. The output ends with your link, like `https://20-115-10-42.sslip.io`, and the admin password. [sslip.io](https://sslip.io) is a free service that turns your IP into a hostname, so no domain is needed.
@@ -71,10 +71,15 @@ It prints a line like `On your phone (same Wi-Fi), open: http://192.168.1.20:300
 **Private repository?** The command above only works if the repository is public. Otherwise, create a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with read-only *Contents* access to this repo, and run:
 ```bash
 T=github_pat_XXXX
-curl -fsSL -H "Authorization: Bearer $T" https://raw.githubusercontent.com/gaurav-swarnkar/serverboy/ccr-af56e66b-azkhkc/scripts/install-on-server.sh | SERVERBOY_REPO="https://x-access-token:$T@github.com/gaurav-swarnkar/serverboy.git" bash
+curl -fsSL -H "Authorization: Bearer $T" https://raw.githubusercontent.com/gaurav-swarnkar/serverboy/HEAD/scripts/install-on-server.sh | SERVERBOY_REPO="https://x-access-token:$T@github.com/gaurav-swarnkar/serverboy.git" bash
 ```
 
-Got a domain later? Point it at the server and run `sudo bash /opt/serverboy/scripts/install-on-server.sh panel.example.com you@example.com`. Run the installer again any time to update Serverboy; your password and saved servers are kept. Change the password under **Settings** in Serverboy. Forgot it? Put a new one in `ADMIN_PASSWORD=` in `/etc/serverboy.env` (`sudo nano /etc/serverboy.env`) and run `sudo systemctl restart serverboy`.
+The installer installs the newest **release**. Run the same command again any time to update; your password, servers and data are kept. Administration → Settings → Updates tells you when a new release is out.
+
+- A specific version (for example to go back after a bad update): `curl -fsSL …/install-on-server.sh | sudo SERVERBOY_VERSION=v1.5.0 bash`
+- The newest development code instead of a release: `… | sudo SERVERBOY_VERSION=edge bash`
+
+Got a domain later? Point it at the server and run the installer with it: `curl -fsSL …/install-on-server.sh | sudo bash -s panel.example.com you@example.com`. Change the password under **Settings** in Serverboy. Forgot it? Put a new one in `ADMIN_PASSWORD=` in `/etc/serverboy.env` (`sudo nano /etc/serverboy.env`) and run `sudo systemctl restart serverboy`.
 
 ## Azure checklist
 
@@ -191,6 +196,30 @@ If you'd rather reach Serverboy from anywhere, run it **on the server** and put 
 3. **Enable SSL** for it.
 
 Never expose it over plain HTTP. Add the server to itself with host `127.0.0.1`.
+
+## Development, tests and releases
+
+```bash
+npm install
+npm run dev          # start with auto-reload
+npm run check        # syntax check of every JS file (server and browser)
+npm test             # unit tests, API tests (starts a throwaway Serverboy)
+TEST_MONGODB_URI=mongodb://127.0.0.1:27017 npm test   # also the Data API engine against MongoDB
+```
+
+Tests use Node's built-in test runner (no extra dependencies) and live in `test/`. Every push and pull request runs **GitHub Actions** (`.github/workflows/ci.yml`):
+
+1. syntax check and all tests on Node 20 and 22, with a real MongoDB;
+2. `npm audit` of the production dependencies;
+3. a full install on a fresh Ubuntu 24.04 machine with the real installer, a login check, and a second run to prove updates keep the data.
+
+**Releasing a version**
+
+1. Add an entry for the new version at the top of `lib/changelog.js` (plain words; it is shown to your team as "What's new" and becomes the release notes). Commit it.
+2. Run `npm run release -- 1.6.0`. It checks everything, sets the version, runs the tests, commits and tags `v1.6.0`.
+3. Push: `git push origin <branch> && git push origin v1.6.0` (or use `npm run release -- 1.6.0 --push`).
+
+Pushing the tag starts `.github/workflows/release.yml`: it checks the tag matches `package.json`, runs the tests again, and publishes the GitHub release with notes and a source archive. Installs and the Updates card pick it up automatically. A test (`test/unit/release.test.js`) fails if `package.json` and the changelog disagree.
 
 ## Project layout
 

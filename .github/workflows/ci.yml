@@ -1,0 +1,92 @@
+# Runs on every push and pull request: syntax check, unit + API tests, Data API engine tests
+# against a real MongoDB, a dependency audit, and a full install on a fresh Ubuntu machine.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    services:
+      mongodb:
+        image: mongo:7
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Syntax check (server, browser code, shell scripts)
+        run: |
+          npm run check
+          for f in scripts/*.sh; do bash -n "$f"; done
+      - name: Tests
+        run: npm test
+        env:
+          TEST_MONGODB_URI: mongodb://127.0.0.1:27017
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Known vulnerabilities in production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  install:
+    name: Install on a fresh Ubuntu
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the installer (with Nginx; the certificate is expected to fail on a test domain)
+        run: sudo bash scripts/install-on-server.sh serverboy.test
+      - name: Serverboy answers and the owner can log in
+        run: |
+          set -euo pipefail
+          systemctl is-active serverboy
+          cat /opt/serverboy/RELEASE
+          PASS=$(sudo grep '^ADMIN_PASSWORD=' /etc/serverboy.env | cut -d= -f2-)
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:3000/api/me && break; sleep 1; done
+          curl -fsS http://127.0.0.1:3000/api/me | grep -q '"loggedIn":false'
+          curl -fsS -H 'Host: serverboy.test' http://127.0.0.1/ | grep -qi '<html'
+          curl -fsS -c /tmp/c -H 'Host: serverboy.test' -H 'content-type: application/json' \
+            -d "{\"username\":\"admin\",\"password\":\"$PASS\"}" http://127.0.0.1/api/login | grep -q '"isOwner":true'
+          curl -fsS -b /tmp/c -H 'Host: serverboy.test' http://127.0.0.1/api/servers
+      - name: Running the installer again updates in place and keeps the data
+        run: |
+          set -euo pipefail
+          PASS=$(sudo grep '^ADMIN_PASSWORD=' /etc/serverboy.env | cut -d= -f2-)
+          sudo bash scripts/install-on-server.sh serverboy.test
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:3000/api/me && break; sleep 1; done
+          curl -fsS -H 'content-type: application/json' -d "{\"username\":\"admin\",\"password\":\"$PASS\"}" http://127.0.0.1:3000/api/login | grep -q '"isOwner":true'
+      - name: Service log
+        if: always()
+        run: sudo journalctl -u serverboy --no-pager -n 100

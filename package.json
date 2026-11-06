@@ -1,12 +1,15 @@
 {
   "name": "serverboy",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "A self-hosted web control panel for managing Linux servers over SSH — install software, manage services, files, databases, websites and Node.js apps.",
   "main": "server.js",
   "private": true,
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
-    "dev": "node --watch --env-file-if-exists=.env server.js"
+    "dev": "node --watch --env-file-if-exists=.env server.js",
+    "test": "node scripts/test.js",
+    "check": "node --experimental-vm-modules --no-warnings scripts/check-syntax.js",
+    "release": "node scripts/release.js"
   },
   "engines": {
     "node": ">=20.12"
@@ -18,9 +21,9 @@
     "@xterm/xterm": "^5.5.0",
     "express": "^5.1.0",
     "mongodb": "^6.10.0",
-    "multer": "^2.0.2",
+    "multer": "^2.5.0",
     "ssh2": "^1.16.0",
     "swagger-ui-dist": "^5.20.0",
-    "ws": "^8.18.3"
+    "ws": "^8.22.0"
   }
 }
