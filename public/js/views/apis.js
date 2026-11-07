@@ -1297,9 +1297,10 @@ export async function diagnose(ctx, svcName, slug, onChanged) {
       return;
     }
     if (!box.isConnected) return;
-    const btn = (s, primary) => (s.action && s.status !== 'ok' ? `<button class="btn-sm ${primary ? 'btn-primary' : ''}" data-diag="${s.action}">${DIAG_BTN[s.action]}</button>` : '');
+    const label = (s) => (s.action === 'move-port' && s.id !== 'port' ? 'Make it independent' : DIAG_BTN[s.action]);
+    const btn = (s, primary) => (s.action && s.status !== 'ok' ? `<button class="btn-sm ${primary ? 'btn-primary' : ''}" data-diag="${s.action}">${label(s)}</button>` : '');
     const n = r.next;
-    const allSteps = ['config', 'setup', 'process', 'answer', 'database'];
+    const allSteps = ['config', 'copy', 'port', 'setup', 'process', 'answer', 'database'];
     const stopped = n?.status === 'bad' && allSteps.includes(n.id);
     box.innerHTML = `
       ${

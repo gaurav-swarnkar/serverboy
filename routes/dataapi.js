@@ -735,6 +735,14 @@ router.get('/mongo/apis/:name/diagnose', async (req, res) => {
   }
   add('config', 'ok', 'Settings found', `${Object.keys(cfg.apis || {}).length} API(s) for the database ${cfg.database}`);
 
+  // A copied folder still answers to the other API server's name, port and address.
+  const ident = await identityOf(serverId, name);
+  if (ident.copyOf) {
+    add('copy', 'bad', `This is a copy of the API server "${ident.copyOf}"`, `Its folder (${dir(name)}) was copied from ${ident.copyOf}, so its files still use ${ident.copyOf}'s name${ident.app?.port ? `, port ${ident.app.port}` : ''}${ident.app?.domain ? ` and address ${ident.app.domain}` : ''}. Everything meant for this API server goes to ${ident.copyOf} instead. "Make it independent" gives it its own name, a free port and its own PM2 entry. ${ident.copyOf} is not touched; its APIs and keys stay as they are, and so do the ones in this copy.`, 'move-port');
+    return done();
+  }
+  if (!ident.writable) add('files', 'warn', 'Serverboy cannot change this folder', `${dir(name)} belongs to another user (for example after copying it as root), so saving its settings fails. "Make it independent" gives the files back.`, 'move-port');
+
   // 2. Setup finished (port, packages, PM2 entry)
   const app = JSON.parse((await readRemote(serverId, `${dir(name)}/.serverboy-app.json`)) || '{}');
   const facts = await ssh.exec(
@@ -842,46 +850,92 @@ ${pm2.whenRunning(`pm2 jlist 2>/dev/null | tail -1`, 'echo "[]"')}`,
   done();
 });
 
-// Move an API server to a free port (when another app took its port). Its public address is
-// pointed at the new port, and it is started again if its setup had got that far.
+// Is this folder really its own API server, or a copy of another one (copied in the File Manager
+// or by hand)? A copy still carries the other's name, port, PM2 entry and address.
+async function identityOf(serverId, name) {
+  const read = async (f) => {
+    try {
+      return JSON.parse((await readRemote(serverId, `${dir(name)}/${f}`)) || 'null');
+    } catch {
+      return null;
+    }
+  };
+  const [cfg, app, pm2File] = await Promise.all([read('api.config.json'), read('.serverboy-app.json'), read('.serverboy-pm2.json')]);
+  const p = pm2File?.apps?.[0];
+  const copyOf = [cfg?.name, app?.name, p?.name].find((n) => n && n !== name) || (p?.cwd && p.cwd !== dir(name) ? p.cwd.split('/').pop() : null);
+  const owner = await ssh.exec(serverId, `[ -w ${q(dir(name))} ] && [ -w ${q(`${dir(name)}/.serverboy-app.json`)} ] && echo WRITABLE`);
+  return { cfg, app, pm2File, copyOf: copyOf || null, writable: owner.stdout.includes('WRITABLE') };
+}
+
+// Make an API server independent: its own name everywhere, its own free port, files it can
+// change, and its own PM2 entry. Used for a taken port and for a copied folder. Its public address
+// is pointed at the new port only if no other app uses the same address.
 router.post('/mongo/apis/:name/move-port', async (req, res) => {
   const serverId = req.params.id;
   const name = apiName(req.params.name);
   await loadConfig(serverId, name);
-  const appPath = `${dir(name)}/.serverboy-app.json`;
-  const app = JSON.parse((await readRemote(serverId, appPath)) || '{}');
+  const changes = [];
+  let id = await identityOf(serverId, name);
+  if (!id.writable) {
+    const entry = await ssh.connect(serverId);
+    await ssh.exec(serverId, `chown -R ${q(entry.server.username)}: ${q(dir(name))}`, { sudo: true, check: true });
+    changes.push(`Gave ${entry.server.username} back the files of ${name}`);
+    id = await identityOf(serverId, name);
+  }
+  if (id.copyOf) changes.push(`It was a copy of ${id.copyOf}: it now has its own name`);
+  const app = id.app || {};
   const old = app.port;
   const port = await freePort(serverId);
-  app.port = port;
-  await ssh.writeFile(serverId, appPath, JSON.stringify(app, null, 2), { sudo: false });
-  const changes = [`Moved from port ${old || '(none)'} to ${port}`];
-  const pm2Path = `${dir(name)}/.serverboy-pm2.json`;
-  let pm2File = null;
-  try {
-    pm2File = JSON.parse((await readRemote(serverId, pm2Path)) || 'null');
-  } catch {
-    pm2File = null;
-  }
-  if (pm2File?.apps?.[0]) {
-    pm2File.apps[0].env = { ...(pm2File.apps[0].env || {}), PORT: String(port) };
-    await ssh.writeFile(serverId, pm2Path, JSON.stringify(pm2File, null, 2), { sudo: false });
-    await ssh.exec(serverId, `chmod 600 ${q(pm2Path)}`);
-  }
+  Object.assign(app, { name, port });
+  // Never keep an address another app also uses: that address belongs to the other app.
   if (app.domain) {
-    // Never take an address away from another app that uses the same one.
     const r = await ssh.exec(serverId, `grep -l ${q(`"domain": ${JSON.stringify(app.domain)}`)} /var/www/*/.serverboy-app.json 2>/dev/null`);
     const others = r.stdout.split('\n').map((f) => f.split('/')[3]).filter((n) => n && n !== name);
-    if (others.length) changes.push(`${app.domain} also belongs to ${others.join(', ')}, so it was left as is. Give this API server its own address (Publish)`);
-    else changes.push(...(await nginx.pointSiteToApi(serverId, app.domain, port)));
+    if (others.length) {
+      changes.push(`${app.domain} belongs to ${others.join(', ')}, so this API server no longer claims it. Give it its own address with Publish`);
+      app.domain = null;
+    }
   }
+  await ssh.writeFile(serverId, `${dir(name)}/.serverboy-app.json`, JSON.stringify(app, null, 2), { sudo: false });
+  changes.push(`Port ${old || '(none)'} → ${port}`);
+  if (id.cfg && id.cfg.name !== name) await ssh.writeFile(serverId, configPath(name), JSON.stringify({ ...id.cfg, name }, null, 2), { sudo: false });
+  const p = id.pm2File?.apps?.[0];
+  // A copy logs in to MongoDB as the original: give it its own login, so deleting one never breaks the other.
+  const database = id.cfg?.database;
+  if (id.copyOf && database && DB_RE.test(database)) {
+    const dbUser = `api_${name.replace(/-/g, '_')}`;
+    const dbPassword = crypto.randomBytes(24).toString('base64url');
+    await mongosh(
+      serverId,
+      `const d = db.getSiblingDB(${JSON.stringify(database)});
+const roles = [{ role: 'readWrite', db: ${JSON.stringify(database)} }];
+if (d.getUser(${JSON.stringify(dbUser)})) d.updateUser(${JSON.stringify(dbUser)}, { pwd: ${JSON.stringify(dbPassword)}, roles });
+else d.createUser({ user: ${JSON.stringify(dbUser)}, pwd: ${JSON.stringify(dbPassword)}, roles });
+out({ ok: 1 });`,
+    );
+    const uri = `mongodb://${dbUser}:${dbPassword}@127.0.0.1:27017/${database}?authSource=${database}`;
+    const env = (await readRemote(serverId, `${dir(name)}/.env`)) || '';
+    const nextEnv = /^MONGODB_URI=.*$/m.test(env) ? env.replace(/^MONGODB_URI=.*$/m, `MONGODB_URI=${uri}`) : `MONGODB_URI=${uri}\n${env}`;
+    await ssh.writeFile(serverId, `${dir(name)}/.env`, nextEnv, { sudo: false });
+    await ssh.exec(serverId, `chmod 600 ${q(`${dir(name)}/.env`)}`);
+    if (p) p.env = { ...(p.env || {}), MONGODB_URI: uri };
+    changes.push(`Its own database login (${dbUser})`);
+  }
+  if (p) {
+    Object.assign(p, { name, cwd: dir(name) });
+    p.env = { ...(p.env || {}), PORT: String(port) };
+    await ssh.writeFile(serverId, `${dir(name)}/.serverboy-pm2.json`, JSON.stringify(id.pm2File, null, 2), { sudo: false });
+    await ssh.exec(serverId, `chmod 600 ${q(`${dir(name)}/.serverboy-pm2.json`)}`);
+  }
+  if (app.domain) changes.push(...(await nginx.pointSiteToApi(serverId, app.domain, port)));
   let started = false;
-  if (pm2File?.apps?.[0]) {
+  if (p) {
     await pm2.ensureDaemon(serverId);
     const r = await ssh.exec(serverId, `cd ${q(dir(name))} && pm2 delete ${q(name)} >/dev/null 2>&1; pm2 start .serverboy-pm2.json >/dev/null && pm2 save >/dev/null && echo started`);
     started = r.stdout.includes('started');
-    if (started) changes.push('Started again');
+    if (started) changes.push('Started');
   }
-  audit(req, `Data API ${name}: moved to port ${port}`);
+  audit(req, `Data API ${name}: made independent on port ${port}${id.copyOf ? ` (was a copy of ${id.copyOf})` : ''}`);
   res.json({ ok: true, port, changes, started });
 });
 
@@ -890,6 +944,8 @@ router.post('/mongo/apis/:name/restart', async (req, res) => {
   const name = apiName(req.params.name);
   await loadConfig(req.params.id, name);
   await pm2.ensureDaemon(req.params.id);
+  const ident = await identityOf(req.params.id, name);
+  if (ident.copyOf) throw new HttpError(409, `${name} is a copy of ${ident.copyOf}: restarting it would restart ${ident.copyOf}. Open Diagnose and click "Make it independent" first.`);
   await ssh.exec(req.params.id, `cd ${q(dir(name))} && (pm2 restart ${q(name)} --update-env >/dev/null 2>&1 || pm2 start .serverboy-pm2.json >/dev/null) && pm2 save >/dev/null && echo ok`, { check: true });
   audit(req, `Data API ${name}: restarted`);
   res.json({ ok: true });
@@ -994,7 +1050,8 @@ router.delete('/mongo/apis/:name', async (req, res) => {
   const dbUser = `api_${name.replace(/-/g, '_')}`;
   await mongosh(serverId, `const d = db.getSiblingDB(${JSON.stringify(cfg.database)}); if (d.getUser(${JSON.stringify(dbUser)})) d.dropUser(${JSON.stringify(dbUser)}); out({ ok: 1 });`).catch(() => {});
   let cmd = `rm -rf -- ${q(dir(name))}`;
-  if (app.domain) cmd += ` && rm -f ${q(`/etc/nginx/sites-enabled/${app.domain}`)} ${q(`/etc/nginx/sites-available/${app.domain}`)} && (nginx -t && systemctl reload nginx || true)`;
+  const shared = app.domain ? (await ssh.exec(serverId, `grep -l ${q(`"domain": ${JSON.stringify(app.domain)}`)} /var/www/*/.serverboy-app.json 2>/dev/null`)).stdout.split('\n').some((f) => f.split('/')[3] && f.split('/')[3] !== name) : false;
+  if (app.domain && !shared) cmd += ` && rm -f ${q(`/etc/nginx/sites-enabled/${app.domain}`)} ${q(`/etc/nginx/sites-available/${app.domain}`)} && (nginx -t && systemctl reload nginx || true)`;
   await ssh.exec(serverId, cmd, { sudo: true, check: true });
   audit(req, `Deleted data API ${name} (the data in ${cfg.database} was not touched)`);
   res.json({ ok: true });
