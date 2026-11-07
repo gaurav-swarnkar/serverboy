@@ -6,6 +6,7 @@ const ssh = require('../lib/ssh');
 const pm2 = require('../lib/pm2');
 const jobs = require('../lib/jobs');
 const nginx = require('../lib/nginx');
+const deploy = require('../lib/deploy');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
@@ -43,7 +44,12 @@ async function readRemote(serverId, file) {
 }
 
 async function loadAppConfig(serverId, name) {
-  const text = await readRemote(serverId, `${appDir(name)}/${APP_FILE}`);
+  let text = await readRemote(serverId, `${appDir(name)}/${APP_FILE}`);
+  // During a deploy the folders are swapped; give it a moment and look again.
+  if (!text) {
+    await new Promise((r) => setTimeout(r, 600));
+    text = await readRemote(serverId, `${appDir(name)}/${APP_FILE}`);
+  }
   if (!text) throw new HttpError(404, `No Serverboy deploy settings found for ${name}`);
   return JSON.parse(text);
 }
@@ -58,6 +64,8 @@ function validateConfig(body) {
     buildCmd: String(body.buildCmd || '').trim(),
     startCmd: String(body.startCmd || 'npm start').trim(),
     domain: body.domain ? nginx.validDomain(body.domain) : null,
+    keep: deploy.cleanKeep(body.keep || []),
+    keepReleases: Math.min(Math.max(Number(body.keepReleases) || 3, 1), 10),
   };
   if (cfg.repo && !/^(https:\/\/|git@|ssh:\/\/)[^\s'"]+$/.test(cfg.repo)) throw new HttpError(400, 'Repository must be an https:// or git@ URL');
   if (!/^[A-Za-z0-9._\/-]{1,100}$/.test(cfg.branch)) throw new HttpError(400, 'Invalid branch name');
@@ -97,6 +105,7 @@ echo "node $(node --version), npm $(npm --version), pm2 $(pm2 --version | tail -
       label: `Fetching ${cfg.repo} (${cfg.branch})`,
       cmd: `set -e
 export GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
+K=~/.ssh/serverboy-deploy-${cfg.name}; [ -f "$K" ] && export GIT_SSH_COMMAND="$GIT_SSH_COMMAND -i $K -o IdentitiesOnly=yes"
 cd ${q(dir)}
 if [ ! -d .git ]; then
   [ -z "$(ls -A | grep -v -e '^.serverboy' -e '^.env$')" ] || { echo "${dir} is not empty and is not a git checkout"; exit 1; }
@@ -227,10 +236,61 @@ router.post('/node-apps', (req, res) => {
   res.json(jobs.create(serverId, `Deploy ${cfg.name}`, steps));
 });
 
+// Apps with a git repository get the safe deploy (build aside, switch, health check, switch
+// back on failure); apps made from uploaded files are rebuilt in place as before.
 router.post('/node-apps/:name/redeploy', async (req, res) => {
   const name = appName(req.params.name);
   const cfg = await loadAppConfig(req.params.id, name);
+  if (cfg.repo) return res.json(deploy.startDeploy(req.params.id, cfg, { by: req.user.username, reason: 'manual' }));
   res.json(jobs.create(req.params.id, `Redeploy ${name}`, buildSteps(req.params.id, cfg, { envText: null, fresh: false })));
+});
+
+// ---------- push-to-deploy, releases, rollback, deploy key ----------
+
+router.get('/node-apps/:name/deploys', async (req, res) => {
+  const name = appName(req.params.name);
+  const cfg = await loadAppConfig(req.params.id, name);
+  const [releases, publicKey] = await Promise.all([deploy.listReleases(req.params.id, name), deploy.deployKey(req.params.id, name)]);
+  res.json({
+    repo: cfg.repo,
+    branch: cfg.branch,
+    keep: cfg.keep || [],
+    keepReleases: cfg.keepReleases || 3,
+    hook: deploy.hookFor(req.params.id, name),
+    releases,
+    deployKey: publicKey,
+    deploying: deploy.isDeploying(req.params.id, name),
+  });
+});
+
+router.put('/node-apps/:name/deploy-settings', async (req, res) => {
+  const name = appName(req.params.name);
+  const cfg = await loadAppConfig(req.params.id, name);
+  const next = { ...cfg, keep: deploy.cleanKeep(req.body?.keep || []), keepReleases: Math.min(Math.max(Number(req.body?.keepReleases) || 3, 1), 10) };
+  await ssh.writeFile(req.params.id, `${appDir(name)}/${APP_FILE}`, JSON.stringify(next, null, 2), { sudo: false });
+  res.json({ keep: next.keep, keepReleases: next.keepReleases });
+});
+
+router.post('/node-apps/:name/hook', async (req, res) => {
+  const name = appName(req.params.name);
+  const cfg = await loadAppConfig(req.params.id, name);
+  if (!cfg.repo) throw new HttpError(400, 'Push-to-deploy needs a git repository. Add one by deploying the app from git.');
+  res.json(deploy.enableHook(req.params.id, name));
+});
+
+router.delete('/node-apps/:name/hook', async (req, res) => {
+  deploy.disableHook(req.params.id, appName(req.params.name));
+  res.json({ ok: true });
+});
+
+router.post('/node-apps/:name/deploy-key', async (req, res) => {
+  res.json({ publicKey: await deploy.deployKey(req.params.id, appName(req.params.name), { create: true }) });
+});
+
+router.post('/node-apps/:name/rollback', async (req, res) => {
+  const name = appName(req.params.name);
+  const cfg = await loadAppConfig(req.params.id, name);
+  res.json(deploy.startRollback(req.params.id, cfg, String(req.body?.release || ''), { by: req.user.username }));
 });
 
 router.get('/node-apps/:name/env', async (req, res) => {
@@ -280,3 +340,4 @@ module.exports = router;
 // Reused by the Data API service (routes/dataapi.js).
 module.exports.buildSteps = buildSteps;
 module.exports.readRemote = readRemote;
+module.exports.loadAppConfig = loadAppConfig;

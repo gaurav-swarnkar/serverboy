@@ -63,8 +63,10 @@ Shipped in v1.4.0 (Backups page) and v1.5.0 (test-restores, Serverboy backup). N
 
 ## 4. Deploys and apps
 
-- [ ] **P1 Push-to-deploy.** Done when: a GitHub/GitLab webhook per Node app runs pull, install, build and restart, the log shows in Tasks, and a failed build keeps the old version running.
-- [ ] **P1 Rollback.** Done when: the last 5 releases are kept and rollback is one click.
+Shipped in v1.7.0: push-to-deploy webhooks (GitHub/GitLab), builds in a separate folder with automatic switch-back, releases and one-click rollback, deploy keys.
+
+- [x] **P1 Push-to-deploy.** Done when: a GitHub/GitLab webhook per Node app runs pull, install, build and restart, the log shows in Tasks, and a failed build keeps the old version running.
+- [x] **P1 Rollback.** Done when: the last 5 releases are kept and rollback is one click.
 - [ ] **P1 Environment variables UI.** Done when: per-app variables can be edited with secrets masked, and the app restarts on save.
 - [ ] **P2 Zero-downtime reload.** Done when: PM2 cluster mode with `pm2 reload` is available for apps that support it.
 - [ ] **P2 Static site deploys.** Done when: a static site deploys from a Git repo with a build command (Vite, Next export).

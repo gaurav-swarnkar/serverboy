@@ -98,7 +98,12 @@ export function modal({ title, body = '', actions = [], wide = false, onClose })
     document.removeEventListener('keydown', onKey);
     onClose?.();
   };
-  const onKey = (e) => e.key === 'Escape' && close();
+  // Esc closes only the top window (a job log opened from a dialog closes back to the dialog).
+  const onKey = (e) => {
+    if (e.key !== 'Escape') return;
+    const all = document.querySelectorAll('.modal-backdrop');
+    if (all[all.length - 1] === backdrop) close();
+  };
   document.addEventListener('keydown', onKey);
   backdrop.querySelector('[data-close]').onclick = close;
   backdrop.addEventListener('mousedown', (e) => e.target === backdrop && close());

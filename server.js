@@ -39,6 +39,8 @@ app.use((req, res, next) => {
   next();
 });
 
+// Webhooks (push-to-deploy) read the raw body to check signatures, so they come before the JSON parser.
+app.use('/hooks', require('./routes/hooks'));
 app.use(express.json({ limit: '20mb' }));
 
 const vendor = (pkg) => path.dirname(require.resolve(`${pkg}/package.json`));

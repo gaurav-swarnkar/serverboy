@@ -1,4 +1,5 @@
 import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, fmtBytes, fmtDuration, onAction, loadingHtml, errorHtml } from '../ui.js';
+import { openDeploys } from './deploys.js';
 
 const DEPLOY_FIELDS = [
   { name: 'name', label: 'App name', placeholder: 'my-saas', required: true, help: 'Files go to /var/www/&lt;name&gt;. Letters, numbers, - and _.' },
@@ -68,7 +69,7 @@ export async function render(el, { server }) {
               <td>${a.status === 'online' && a.uptime ? fmtDuration((Date.now() - a.uptime) / 1000) : '–'}</td>
               <td>${a.restarts}</td>
               <td class="actions">
-                ${a.config ? `<button class="btn-sm btn-primary" data-action="redeploy" data-i="${i}">Redeploy</button><button class="btn-sm" data-action="env" data-i="${i}">Env</button>` : ''}
+                ${a.config ? `<button class="btn-sm btn-primary" data-action="redeploy" data-i="${i}">${a.config.repo ? 'Deploy' : 'Redeploy'}</button>${a.config.repo ? `<button class="btn-sm" data-action="deploys" data-i="${i}" title="Push to deploy, releases and rollback">Deploys</button>` : ''}<button class="btn-sm" data-action="env" data-i="${i}">Env</button>` : ''}
                 <button class="btn-sm" data-action="logs" data-i="${i}">Logs</button>
                 ${a.status === 'online'
                   ? `<button class="btn-sm" data-action="op" data-op="restart" data-i="${i}">Restart</button><button class="btn-sm" data-action="op" data-op="stop" data-i="${i}">Stop</button>`
@@ -98,13 +99,19 @@ export async function render(el, { server }) {
     },
     redeploy: async ({ i }) => {
       const a = apps[i];
-      if (!(await confirmDialog(`Pull the latest code for ${a.name}, reinstall, rebuild and restart it?`, { confirmLabel: 'Redeploy' }))) return;
+      const msg = a.config?.repo
+        ? `Deploy the latest ${a.config.branch} of ${a.name}? It is built in a separate folder first; if the new version does not start, the current one stays.`
+        : `Reinstall, rebuild and restart ${a.name} from the files in its folder?`;
+      if (!(await confirmDialog(msg, { confirmLabel: a.config?.repo ? 'Deploy' : 'Redeploy' }))) return;
       try {
-        showJob(server.id, await api(`${base}/node-apps/${a.name}/redeploy`, { method: 'POST' }), { onDone: load });
+        const job = await api(`${base}/node-apps/${a.name}/redeploy`, { method: 'POST' });
+        if (job.queued) toast('A deploy of this app is running; this one runs right after it.', 'ok');
+        else showJob(server.id, job, { onDone: load });
       } catch (err) {
         toast(err.message, 'error');
       }
     },
+    deploys: ({ i }) => openDeploys(server, apps[i], { onChange: load }),
     env: async ({ i }) => {
       const a = apps[i];
       let env;

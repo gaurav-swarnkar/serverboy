@@ -129,6 +129,12 @@ test('backups settings of a server are owner data', async () => {
   assert.equal(bad.status, 400);
 });
 
+test('the webhook endpoint needs no login but refuses unknown hooks', async () => {
+  const res = await fetch(`${base}/hooks/deploy/0123456789abcdef0123456789abcdef`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(res.status, 404);
+  assert.equal((await fetch(`${base}/hooks/anything-else`, { method: 'POST' })).status, 404);
+});
+
 test('logout ends the session', async () => {
   assert.equal((await call('/api/logout', { method: 'POST' })).status, 200);
   assert.equal((await (await call('/api/me')).json()).loggedIn, false);

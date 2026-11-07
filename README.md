@@ -103,6 +103,16 @@ Private GitHub repo? Use `https://<token>@github.com/you/repo.git` with a fine-g
 
 Each app lives in `/var/www/<name>`, owned by your SSH user, with its settings in `.serverboy-app.json` and secrets in `.env`.
 
+## Push to deploy (Node apps from git)
+
+Every git app has a **Deploys** button in Node Apps.
+
+- **Safe deploys.** A deploy fetches the branch into a separate folder, installs and builds there, and only then switches the live folder. If the build fails, the running app is not touched. If the new version does not start (PM2 not online, or nothing answering on its port within about 20 seconds), the previous version is put back automatically and you get a message.
+- **Push to deploy.** Turn it on to get a webhook URL and secret. Add them in GitHub (Settings → Webhooks, content type `application/json`, push events) or GitLab (Settings → Webhooks, secret token, push events). Pushes to the app's branch deploy it; other branches are ignored; a push during a deploy runs right after it. GitHub deliveries are checked with the HMAC signature, GitLab ones with the token. Serverboy must be reachable from the internet over HTTPS for this.
+- **Releases and rollback.** The last 3 versions are kept (with `node_modules`), so **Roll back** takes seconds. A version that failed to start is kept for 7 days to look at.
+- **Kept between deploys.** `.env` is always carried over. Add anything your app writes into its own folder (for example `uploads` or `data/app.db`) under *Kept between deploys*.
+- **Private repositories.** *Create deploy key* makes an SSH key on the server for this app; add the public key to the repository as a read-only deploy key and use the `git@github.com:owner/repo.git` address.
+
 ## APIs (MongoDB data over HTTPS)
 
 Hosting → **APIs** lists every database, its collections and the APIs of each collection (Try · Docs · settings, and **+ New API for <collection>**). In **Databases → MongoDB**, each collection shows how many APIs use it and has an **APIs** tab with the same links. An API is a named, safe door to one MongoDB collection, at `https://<api-server>/api/<name>`. Make as many as you like, also several for the same collection with different rules, e.g. **Products** (anyone can see) and **Products admin** (apps with a key can add, change and delete).
