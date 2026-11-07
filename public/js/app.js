@@ -18,6 +18,7 @@ const views = {
   'admin-roles': () => import('./views/admin-roles.js'),
   'admin-activity': () => import('./views/admin-activity.js'),
   'admin-settings': () => import('./views/admin-settings.js'),
+  'admin-alerts': () => import('./views/admin-alerts.js'),
   dashboard: () => import('./views/dashboard.js'),
   terminal: () => import('./views/terminal.js'),
   files: () => import('./views/files.js'),
@@ -44,6 +45,7 @@ const VIEW_PERMISSION = {
   'admin-roles': 'owner',
   'admin-activity': 'owner',
   'admin-settings': 'owner',
+  'admin-alerts': 'owner',
   dashboard: null,
   terminal: 'terminal',
   files: 'files',
@@ -75,6 +77,7 @@ const PORTAL_NAV = [
       ['admin-users', 'user', 'Users', '#/admin/users'],
       ['admin-roles', 'key', 'Roles & permissions', '#/admin/roles'],
       ['admin-activity', 'activity', 'Activity log', '#/admin/activity'],
+      ['admin-alerts', 'alert', 'Alerts', '#/admin/alerts'],
       ['admin-settings', 'settings', 'Settings', '#/admin/settings'],
     ],
   ],
@@ -105,6 +108,7 @@ const PAGE_INFO = {
   'admin-roles': ['Administration', 'Users, roles, activity and settings.'],
   'admin-activity': ['Administration', 'Users, roles, activity and settings.'],
   'admin-settings': ['Administration', 'Users, roles, activity and settings.'],
+  'admin-alerts': ['Administration', 'Users, roles, activity and settings.'],
 };
 
 const state = { servers: [], cleanup: null };

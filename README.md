@@ -113,6 +113,16 @@ Every git app has a **Deploys** button in Node Apps.
 - **Kept between deploys.** `.env` is always carried over. Add anything your app writes into its own folder (for example `uploads` or `data/app.db`) under *Kept between deploys*.
 - **Private repositories.** *Create deploy key* makes an SSH key on the server for this app; add the public key to the repository as a read-only deploy key and use the `git@github.com:owner/repo.git` address.
 
+## Alerts
+
+**Administration → Alerts** sends alerts by **email** (any SMTP account; for Gmail use an app password), **Telegram** (a bot from @BotFather), **Slack**, **Discord** or a **webhook**, and always to the Serverboy inbox. Every channel has a *Send test* button.
+
+Serverboy checks each server every 5 minutes (configurable): websites and Nginx, services, Node apps, disk and memory, whether the server can be reached at all, and HTTPS certificates (every 6 hours, alert under 14 days). Backups, test-restores and deploys report their failures through the same channels.
+
+- A problem alerts only after two checks in a row; you get a **Fixed** message when it clears and a reminder once a day while it lasts.
+- Several problems found at once arrive as one grouped message, and problems hidden by a bigger one (server unreachable, Nginx down) are not reported as fixed.
+- Serverboy checks from where it runs. If it runs on the same server it watches, also use an outside check (for example Uptime Kuma from *1-click apps* on another machine, or UptimeRobot) for "the whole server is off".
+
 ## 1-click apps (Docker)
 
 **Hosting → 1-click apps** installs ready-made apps with Docker: **WordPress** (with its own MariaDB), **n8n** (workflow automation) and **Uptime Kuma** (uptime monitoring). Install Docker from the App Store first.

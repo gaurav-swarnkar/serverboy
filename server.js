@@ -76,6 +76,8 @@ api.use(people);
 api.use(require('./routes/servers'));
 api.use(require('./routes/team'));
 api.use(require('./routes/serverboy-backup'));
+api.use(require('./routes/alerts'));
+require('./lib/monitor').start();
 require('./lib/self-backup').startScheduler();
 
 const perServer = express.Router({ mergeParams: true });

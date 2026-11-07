@@ -688,3 +688,20 @@ tr.deploy-live td { background: color-mix(in srgb, var(--accent-soft) 50%, trans
 .oc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
 .oc-card { display: flex; flex-direction: column; }
 .oc-card > button { margin-top: auto; align-self: flex-start; }
+
+/* Administration → Alerts */
+.al-channels { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; align-items: start; }
+.al-ch { min-width: 0; }
+.al-ch .grid-2 { grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.al-ch .grid-2 > * { min-width: 0; }
+.al-ch input:not([type=checkbox]), .al-ch select { width: 100%; min-width: 0; }
+.al-ch .al-port { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.al-ch .al-port .field { width: 90px; }
+.al-ch .al-port .check { margin-bottom: 12px; }
+.al-ch .al-ch-body p { overflow-wrap: anywhere; }
+@media (max-width: 760px) { .al-ch .grid-2 { grid-template-columns: 1fr; } }
+.al-ch:not(.on) .al-ch-body { display: none; }
+.al-ch.on { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.al-srv { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.al-srv:last-child { border-bottom: 0; }
+.al-p { margin-top: 4px; }

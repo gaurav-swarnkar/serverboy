@@ -55,7 +55,9 @@ Shipped in v1.4.0 (Backups page) and v1.5.0 (test-restores, Serverboy backup). N
 
 ## 3. Monitoring and alerts
 
-- [ ] **P0 Alerts.** Done when: health problems (site down, disk > 90%, PM2 app crashed, Mongo down, SSL expiring in under 14 days, backup failed) are sent by email and Telegram or Slack, with a "fixed" message after.
+Shipped in v1.9.0: alerts by email, Telegram, Slack, Discord and webhook from a 5-minute health monitor, with SSL expiry, grouping, "fixed" messages and daily reminders.
+
+- [x] **P0 Alerts.** Done when: health problems (site down, disk > 90%, PM2 app crashed, Mongo down, SSL expiring in under 14 days, backup failed) are sent by email and Telegram or Slack, with a "fixed" message after.
 - [ ] **P1 Uptime checks from outside.** Done when: an external probe checks each live site every minute, so the alert still arrives when the whole VM is down.
 - [ ] **P1 History.** Done when: CPU, memory, disk and requests are kept for 30 days with charts, not only the live 3 minutes.
 - [ ] **P1 Log viewer.** Done when: Nginx access and error logs and PM2 logs can be searched with a time filter in the UI.
