@@ -229,7 +229,9 @@ Tests use Node's built-in test runner (no extra dependencies) and live in `test/
 2. Run `npm run release -- 1.6.0`. It checks everything, sets the version, runs the tests, commits and tags `v1.6.0`.
 3. Push: `git push origin <branch> && git push origin v1.6.0` (or use `npm run release -- 1.6.0 --push`).
 
-Pushing the tag starts `.github/workflows/release.yml`: it checks the tag matches `package.json`, runs the tests again, and publishes the GitHub release with notes and a source archive. Installs and the Updates card pick it up automatically. A test (`test/unit/release.test.js`) fails if `package.json` and the changelog disagree.
+If you cannot push tags, open GitHub → **Actions → Release → Run workflow**, choose the branch and enter the version (for example `v1.6.0`); it creates the tag for you.
+
+Pushing the tag (or running it by hand) starts `.github/workflows/release.yml`: it checks the tag matches `package.json`, runs the tests again, and publishes the GitHub release with notes and a source archive. Installs and the Updates card pick it up automatically. A test (`test/unit/release.test.js`) fails if `package.json` and the changelog disagree.
 
 ## Project layout
 
