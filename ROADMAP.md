@@ -106,7 +106,7 @@ Leave these to dedicated tools; they would add risk without strengthening Server
 
 - Email hosting (use Zoho, Google Workspace, Migadu, or HestiaCP on a separate server).
 - DNS hosting (use Cloudflare or the registrar).
-- A Docker orchestrator (use Coolify if a project needs containers).
+- A full Docker orchestrator (Kubernetes / Swarm, hundreds of templates). Serverboy has a small curated set of 1-click apps (v1.8.0) instead; use Coolify if a project needs a full container platform.
 
 ---
 

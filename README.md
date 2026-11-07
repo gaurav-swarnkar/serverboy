@@ -113,6 +113,15 @@ Every git app has a **Deploys** button in Node Apps.
 - **Kept between deploys.** `.env` is always carried over. Add anything your app writes into its own folder (for example `uploads` or `data/app.db`) under *Kept between deploys*.
 - **Private repositories.** *Create deploy key* makes an SSH key on the server for this app; add the public key to the repository as a read-only deploy key and use the `git@github.com:owner/repo.git` address.
 
+## 1-click apps (Docker)
+
+**Hosting → 1-click apps** installs ready-made apps with Docker: **WordPress** (with its own MariaDB), **n8n** (workflow automation) and **Uptime Kuma** (uptime monitoring). Install Docker from the App Store first.
+
+- Choose a name and an address; Serverboy writes a `docker-compose.yml` in `/opt/serverboy-apps/<name>/`, generates the passwords (in a private `.env`), starts the app, puts it behind Nginx and gets a free HTTPS certificate.
+- Containers listen on **127.0.0.1 only**, so Docker cannot open ports past UFW (a common Docker pitfall).
+- Start, stop, restart, **Update** (pulls the newest image), logs, and Remove (keeps the data unless you tick delete) from the same page.
+- Backups include the app folders. For WordPress the database is dumped and paused during the copy; restore stops the app, puts its folder back and starts it.
+
 ## APIs (MongoDB data over HTTPS)
 
 Hosting → **APIs** lists every database, its collections and the APIs of each collection (Try · Docs · settings, and **+ New API for <collection>**). In **Databases → MongoDB**, each collection shows how many APIs use it and has an **APIs** tab with the same links. An API is a named, safe door to one MongoDB collection, at `https://<api-server>/api/<name>`. Make as many as you like, also several for the same collection with different rules, e.g. **Products** (anyone can see) and **Products admin** (apps with a key can add, change and delete).

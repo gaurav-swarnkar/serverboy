@@ -4,7 +4,7 @@ import { api, esc, toast, run, modal, confirmDialog, showJob, onAction, loadingH
 
 const EVERY = { '6h': 'Every 6 hours', '12h': 'Every 12 hours', day: 'Every day', week: 'Every week' };
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const TYPE_LABEL = { mongo: 'MongoDB', mysql: 'MySQL', files: 'Folder', settings: 'Settings' };
+const TYPE_LABEL = { mongo: 'MongoDB', mysql: 'MySQL', files: 'Folder', app: '1-click app', settings: 'Settings' };
 const STATUS = { success: ['ok', 'complete'], partial: ['warn', 'incomplete'], failed: ['bad', 'failed'], running: ['', 'running…'] };
 
 const when = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—');
@@ -193,6 +193,8 @@ export async function render(el, { server }) {
           <label class="check"><input type="checkbox" name="files" ${inc.files ? 'checked' : ''}> <b>Website and app folders</b> <span class="muted small">(/var/www)</span></label>
           <div class="bk-sub">${listPick('files', inv.files, inc.fileDirs, 'folders')}
             <label class="check small"><input type="checkbox" name="skipNodeModules" ${inc.skipNodeModules ? 'checked' : ''}> Skip node_modules (re-installed on deploy; saves a lot of space)</label></div>
+          <label class="check"><input type="checkbox" name="apps" ${inc.apps !== false ? 'checked' : ''}> <b>1-click apps</b> <span class="muted small">(WordPress, n8n…; databases are dumped first)</span></label>
+          <div class="bk-sub">${(inv.apps || []).length ? listPick('apps', inv.apps, inc.appNames || 'all', 'apps') : '<div class="small muted">None installed.</div>'}</div>
           <label class="check"><input type="checkbox" name="settings" ${inc.settings ? 'checked' : ''}> <b>Server settings</b></label>
           <span class="muted small bk-hint">Nginx sites, SSL certificates, PM2 app list, firewall rules, crontabs</span>
         </div>
@@ -268,14 +270,14 @@ export async function render(el, { server }) {
     const body = {
       enabled: f.enabled.checked,
       schedule: { every: f.every.value, time: f.time.value, weekday: Number(f.weekday.value), tz: f.tz.value.trim() },
-      include: { mongo: f.mongo.checked, mongoDbs: chosen('mongo'), mysql: f.mysql.checked, mysqlDbs: chosen('mysql'), files: f.files.checked, fileDirs: chosen('files'), skipNodeModules: f.skipNodeModules.checked, settings: f.settings.checked },
+      include: { mongo: f.mongo.checked, mongoDbs: chosen('mongo'), mysql: f.mysql.checked, mysqlDbs: chosen('mysql'), files: f.files.checked, fileDirs: chosen('files'), apps: f.apps.checked, appNames: chosen('apps'), skipNodeModules: f.skipNodeModules.checked, settings: f.settings.checked },
       keepLocal: Number(f.keepLocal.value),
       keepRemote: Number(f.keepRemote.value),
       drill: f.drill.value,
       localOnlyOk: f.rtype.value === 'none' && f.localOnlyOk.checked,
       remote: remoteFromForm(f),
     };
-    if (!body.include.mongo && !body.include.mysql && !body.include.files && !body.include.settings) {
+    if (!body.include.mongo && !body.include.mysql && !body.include.files && !body.include.apps && !body.include.settings) {
       toast('Choose at least one thing to back up', 'error');
       return null;
     }
@@ -295,6 +297,7 @@ export async function render(el, { server }) {
         opts = `<select data-mode="${i}"><option value="replace">Replace the current data</option><option value="merge">Import into it</option></select>
           <label class="small">into database <input data-target="${i}" value="${esc(it.name)}" class="mono" style="width:160px"></label>`;
       else if (it.type === 'files') opts = `<select data-mode="${i}"><option value="alongside">Restore next to it (new folder)</option><option value="replace">Replace the current folder</option></select>`;
+      else if (it.type === 'app') opts = '<span class="small muted">Stops the app, replaces its folder (data, settings, database) with the backup and starts it again.</span>';
       else opts = '<span class="small muted">Unpacked into a folder on the server to copy from. Nothing live is changed.</span>';
       return `<div class="bk-restore-row">
         <label class="check"><input type="checkbox" data-pick="${i}"> <b>${TYPE_LABEL[it.type]}</b> <span class="mono">${esc(it.type === 'settings' ? '' : it.name)}</span> <span class="muted small">${fmtBytes(it.size)}${it.parts ? ` · ${it.parts} parts` : ''}</span></label>

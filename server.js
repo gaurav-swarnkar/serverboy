@@ -94,6 +94,7 @@ perServer.use(require('./routes/dataapi'));
 perServer.use(require('./routes/sites'));
 perServer.use(require('./routes/nodeapps'));
 perServer.use(require('./routes/backups'));
+perServer.use(require('./routes/dockerapps'));
 require('./lib/backups').startScheduler();
 api.use('/servers/:id', perServer);
 app.use('/api', api);

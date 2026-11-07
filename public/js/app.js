@@ -31,6 +31,7 @@ const views = {
   firewall: () => import('./views/firewall.js'),
   jobs: () => import('./views/jobs.js'),
   backups: () => import('./views/backups.js'),
+  oneclick: () => import('./views/oneclick.js'),
 };
 
 // Permission each page needs (null = anyone logged in). The server enforces the same rules.
@@ -56,11 +57,12 @@ const VIEW_PERMISSION = {
   firewall: 'system',
   jobs: null,
   backups: 'owner',
+  oneclick: 'system',
 };
 
 const SERVER_NAV = [
   ['Main menu', [['dashboard', 'home', 'Dashboard'], ['terminal', 'terminal', 'Terminal'], ['files', 'folder', 'File Manager']]],
-  ['Hosting', [['sites', 'globe', 'Websites'], ['nodeapps', 'hexagon', 'Node Apps'], ['databases', 'database', 'Databases'], ['apis', 'plug', 'APIs']]],
+  ['Hosting', [['sites', 'globe', 'Websites'], ['nodeapps', 'hexagon', 'Node Apps'], ['databases', 'database', 'Databases'], ['apis', 'plug', 'APIs'], ['oneclick', 'grid', '1-click apps']]],
   ['Software', [['apps', 'package', 'App Store'], ['services', 'sliders', 'Services'], ['storage', 'drive', 'Disk & cleanup']]],
   ['Security', [['backups', 'archive', 'Backups'], ['firewall', 'shield', 'Firewall'], ['jobs', 'list', 'Tasks']]],
 ];
@@ -94,6 +96,7 @@ const PAGE_INFO = {
   firewall: ['Firewall', 'Choose which ports the internet can reach.'],
   jobs: ['Tasks', 'Live logs of installs and deployments.'],
   backups: ['Backups', 'Automatic copies of your data, with one-click restore.'],
+  oneclick: ['1-click apps', 'WordPress, n8n, Uptime Kuma and more, installed in one click.'],
   servers: ['Home', 'All your servers at a glance.'],
   people: ['Team', 'Everyone who works on these servers.'],
   messages: ['Messages', 'Talk to your team.'],
