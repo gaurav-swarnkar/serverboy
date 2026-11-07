@@ -64,7 +64,13 @@ export async function render(el, { server }) {
           <div class="small muted">Stored</div>
           <h3 style="margin:6px 0">${info.remote.type === 'none' ? 'On this server only' : esc(info.remoteLabel)}</h3>
           <div class="small muted">Keeps the last ${info.keepLocal} on the server${info.remote.type === 'none' ? '' : ` and ${info.keepRemote} in the cloud`}</div>
-          ${info.remote.type === 'none' ? '<div class="small" style="color:var(--warn);margin-top:6px">If the server is lost, its backups are lost too. Add cloud storage in Settings.</div>' : ''}
+          ${
+            info.remote.type !== 'none'
+              ? ''
+              : info.localOnlyOk
+                ? '<div class="small muted" style="margin-top:6px">You chose to keep backups on this server only. Tip: now and then download the newest backup (Restore… → Download) to your computer. <button class="btn-sm btn-ghost" data-action="warnAgain">Warn me again</button></div>'
+                : '<div class="small" style="color:var(--warn);margin-top:6px">If the server is lost, its backups are lost too. Add cloud storage in Settings. <button class="btn-sm btn-ghost" data-action="localOk">Keep them here only</button></div>'
+          }
         </div>
         ${drillCard(info)}
       </div>`;
@@ -198,7 +204,8 @@ export async function render(el, { server }) {
         <label class="check"><input type="radio" name="rtype" value="s3" ${r.type === 's3' ? 'checked' : ''}> S3-compatible <span class="muted small">AWS S3, Cloudflare R2, Backblaze B2, Wasabi, DigitalOcean Spaces, MinIO</span></label>
         <label class="check"><input type="radio" name="rtype" value="azure" ${r.type === 'azure' ? 'checked' : ''}> Azure Blob Storage</label>
       </div>
-      <div id="bk-s3" class="grid grid-2 ${r.type === 's3' ? '' : 'hidden'}" style="margin-top:8px">
+      <label class="check small bk-localok ${r.type === 'none' ? '' : 'hidden'}" style="margin-top:6px"><input type="checkbox" name="localOnlyOk" ${info.localOnlyOk ? 'checked' : ''}> I don't have cloud storage: keep backups on this server only and don't warn me about it</label>
+      <div id="bk-s3" class=""grid grid-2 ${r.type === 's3' ? '' : 'hidden'}" style="margin-top:8px">
         <label class="field"><span>Endpoint</span><input name="endpoint" value="${esc(r.endpoint || '')}" placeholder="empty for AWS · https://ACCOUNT.r2.cloudflarestorage.com · https://s3.eu-central-003.backblazeb2.com"></label>
         <label class="field"><span>Region</span><input name="region" value="${esc(r.region || '')}" placeholder="us-east-1 (R2: auto)"></label>
         <label class="field"><span>Bucket</span><input name="bucket" value="${esc(r.bucket || '')}" placeholder="my-backups"></label>
@@ -223,6 +230,7 @@ export async function render(el, { server }) {
       f.querySelector('#bk-s3').classList.toggle('hidden', t !== 's3');
       f.querySelector('#bk-azure').classList.toggle('hidden', t !== 'azure');
       f.querySelector('#bk-test').disabled = t === 'none';
+      f.querySelector('.bk-localok').classList.toggle('hidden', t !== 'none');
     };
     f.addEventListener('change', (e) => {
       if (e.target.name === 'rtype') showType();
@@ -264,6 +272,7 @@ export async function render(el, { server }) {
       keepLocal: Number(f.keepLocal.value),
       keepRemote: Number(f.keepRemote.value),
       drill: f.drill.value,
+      localOnlyOk: f.rtype.value === 'none' && f.localOnlyOk.checked,
       remote: remoteFromForm(f),
     };
     if (!body.include.mongo && !body.include.mysql && !body.include.files && !body.include.settings) {
@@ -322,6 +331,13 @@ export async function render(el, { server }) {
   }
 
   onAction(el, {
+    localOk: async (d, btn) => {
+      if (!(await confirmDialog('Keep backups only on this server and stop warning about it? If the server is deleted or its disk fails, its backups are lost too.', { confirmLabel: "Don't warn me" }))) return;
+      if (await run(btn, () => api(`${base}/local-only`, { method: 'POST', body: { ok: true } }), 'The warning is hidden')) refresh();
+    },
+    warnAgain: async (d, btn) => {
+      if (await run(btn, () => api(`${base}/local-only`, { method: 'POST', body: { ok: false } }), 'The warning is back on')) refresh();
+    },
     drill: async (d, btn) => {
       const job = await run(btn, () => api(`${base}/drill`, { method: 'POST', body: {} }));
       if (job) {

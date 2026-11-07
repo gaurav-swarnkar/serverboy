@@ -107,7 +107,7 @@ export function mountHealth(el, server, { onData } = {}) {
     if (p.area === 'service' && can('services')) return `<button class="btn-sm" data-action="hc-diagnose" data-unit="${esc(p.target)}">Diagnose</button>`;
     if (p.area === 'site' && p.target === 'nginx' && can('services')) return '<button class="btn-sm" data-action="hc-diagnose" data-unit="nginx">Diagnose</button>';
     if (p.area === 'site' && can('sites')) return `<a class="btn btn-sm" href="#/s/${server.id}/sites">Websites</a>`;
-    if (p.area === 'backup' && can('owner')) return `<a class="btn btn-sm" href="#/s/${server.id}/backups">Backups</a>`;
+    if (p.area === 'backup' && can('owner')) return `${p.dismiss === 'local-only' ? '<button class="btn-sm btn-ghost" data-action="hc-local-ok" title="Keep backups on this server only and stop showing this warning">Don\'t warn me</button>' : ''}<a class="btn btn-sm" href="#/s/${server.id}/backups">Backups</a>`;
     if (p.area === 'app' && can('nodeapps')) return `<a class="btn btn-sm" href="#/s/${server.id}/nodeapps">Node Apps</a>`;
     if (p.fix && can('system')) return `<button class="btn-sm" data-action="hc-fix" data-fix="${p.fix}">${p.fix === 'cleanup' ? 'Free space' : 'Add swap'}</button>`;
     return '';
@@ -183,6 +183,18 @@ export function mountHealth(el, server, { onData } = {}) {
       load();
     },
     'hc-diagnose': ({ unit }) => diagnose(unit),
+    'hc-local-ok': async (_d, btn) => {
+      if (!(await confirmDialog('Keep backups only on this server and stop warning about it? If the server is deleted or its disk fails, its backups are lost too. You can add cloud storage later in Backups → Settings, which also brings the warning back.', { confirmLabel: "Don't warn me" }))) return;
+      btn.disabled = true;
+      try {
+        await api(`/servers/${server.id}/backups/local-only`, { method: 'POST', body: { ok: true } });
+        toast('OK. Backups stay on this server; the warning is hidden.', 'ok');
+        load();
+      } catch (err) {
+        toast(err.message, 'error');
+        btn.disabled = false;
+      }
+    },
     'hc-fix': async ({ fix, unit }, btn) => {
       const label = { restart: 'Restart', start: 'Start', cleanup: 'Free disk space', 'add-swap': 'Add 2 GB swap' }[fix] || fix;
       if (!(await confirmDialog(`${label}${unit ? ` ${unit}` : ''}?`, { confirmLabel: label }))) return;

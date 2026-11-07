@@ -30,6 +30,12 @@ router.get('/backups/inventory', async (req, res) => res.json(await backups.inve
 
 router.post('/backups/test-storage', async (req, res) => res.json(await backups.testRemote(req.params.id, req.body?.remote)));
 
+router.post('/backups/local-only', (req, res) => {
+  const out = backups.setLocalOnlyOk(req.params.id, req.body?.ok !== false);
+  team.audit({ user: req.user.username, ip: req.ip, action: `${out.localOnlyOk ? 'Chose to keep backups only on' : 'Turned the server-only backup warning back on for'} ${serverName(req)}` });
+  res.json(out);
+});
+
 router.post('/backups/drill', (req, res) => res.json(backups.startDrill(req.params.id, { reason: 'manual', user: req.user.username, backupId: req.body?.backupId || null })));
 
 router.post('/backups/run', (req, res) => res.json(backups.startBackup(req.params.id, { reason: 'manual', user: req.user.username })));

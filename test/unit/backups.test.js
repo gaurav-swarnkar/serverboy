@@ -78,3 +78,18 @@ test('health warns when backups are missing, off or failing', () => {
   store.setBackupState(server.id, { lastDrill: { status: 'failed', backupId: '20261106-030000', at: new Date().toISOString(), error: 'checksum' } });
   assert.ok(backups.healthProblems(server.id).some((p) => p.level === 'bad' && /test-restore failed/.test(p.text)));
 });
+
+test('keeping backups on the server only can be chosen, which hides that warning', () => {
+  const server = store.addServer({ name: 'solo', host: '10.0.0.3', port: 22, username: 'u', password: 'pw' });
+  backups.saveSettings(server.id, { enabled: true, remote: { type: 'none' } });
+  const onlyHere = (id) => backups.healthProblems(id).filter((p) => /only kept on this server/.test(p.text));
+  assert.equal(onlyHere(server.id).length, 1);
+  assert.equal(onlyHere(server.id)[0].dismiss, 'local-only');
+  assert.equal(backups.setLocalOnlyOk(server.id, true).localOnlyOk, true);
+  assert.equal(onlyHere(server.id).length, 0);
+  // Saving other settings keeps the choice; turning it off brings the warning back.
+  backups.saveSettings(server.id, { enabled: true, keepLocal: 5, remote: { type: 'none' } });
+  assert.equal(onlyHere(server.id).length, 0);
+  backups.setLocalOnlyOk(server.id, false);
+  assert.equal(onlyHere(server.id).length, 1);
+});
