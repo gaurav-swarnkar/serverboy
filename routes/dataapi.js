@@ -170,11 +170,56 @@ async function requireMigrated(serverId, name, cfg) {
   if (!isMigrated(cfg)) throw new HttpError(409, `${name} runs an older API engine. Click "Update engine" first (one click, nothing is lost).`);
 }
 
+// Ports in use: listening now, saved for a Serverboy app (even one that is stopped), or given to a
+// PM2 process (PORT), so two API servers never get the same port.
+async function usedPorts(serverId) {
+  const r = await ssh.exec(serverId, `ss -ltnH 2>/dev/null | awk '{print $4}' | sed 's/.*://'; cat /var/www/*/.serverboy-app.json 2>/dev/null | grep -o '"port": *[0-9]*' | grep -o '[0-9]*$'; echo __PM2__; ${pm2.whenRunning('pm2 jlist 2>/dev/null | tail -1')}`);
+  const [plain, pm2Part = ''] = r.stdout.split('__PM2__');
+  const used = new Set(plain.split('\n').map((x) => x.trim()).filter(Boolean));
+  try {
+    for (const p of JSON.parse(pm2Part.trim().split('\n').pop() || '[]')) {
+      const port = p.pm2_env?.PORT ?? p.pm2_env?.env?.PORT;
+      if (port) used.add(String(port));
+    }
+  } catch {
+    /* PM2 output not readable */
+  }
+  return used;
+}
+
 async function freePort(serverId) {
-  const r = await ssh.exec(serverId, `ss -ltnH 2>/dev/null | awk '{print $4}' | sed 's/.*://'; cat /var/www/*/.serverboy-app.json 2>/dev/null | grep -o '"port": *[0-9]*' | grep -o '[0-9]*$'`);
-  const used = new Set(r.stdout.split('\n').map((x) => x.trim()).filter(Boolean));
+  const used = await usedPorts(serverId);
   for (let p = 4100; p < 5000; p++) if (!used.has(String(p))) return p;
   throw new HttpError(500, 'No free port found between 4100 and 4999');
+}
+
+// Which other app uses this port: another Serverboy app folder, or a PM2 process started with it?
+async function portOwner(serverId, port, except) {
+  const r = await ssh.exec(serverId, `for f in /var/www/*/.serverboy-app.json; do [ -f "$f" ] && echo "$(basename "$(dirname "$f")") $(grep -o '"port": *[0-9]*' "$f" | grep -o '[0-9]*$')"; done; echo __PM2__; ${pm2.whenRunning('pm2 jlist 2>/dev/null | tail -1')}`);
+  const [files, pm2Part = ''] = r.stdout.split('__PM2__');
+  try {
+    for (const p of JSON.parse(pm2Part.trim().split('\n').pop() || '[]')) {
+      if (p.name !== except && Number(p.pm2_env?.PORT ?? p.pm2_env?.env?.PORT) === Number(port)) return p.name;
+    }
+  } catch {
+    /* PM2 output not readable */
+  }
+  for (const line of files.split('\n')) {
+    const [n, p] = line.trim().split(' ');
+    if (n && n !== except && Number(p) === Number(port)) return n;
+  }
+  return null;
+}
+
+// Something else answers on this API server's port: explain it (the classic "404: There is no API
+// called ..." while this one is not running) and offer to move to a free port.
+async function portClash(serverId, name, port, h) {
+  const owner = await portOwner(serverId, port, name).catch(() => null);
+  const who = owner ? `the app "${owner}"` : 'another program';
+  return {
+    title: `Port ${port} is taken by ${owner ? `"${owner}"` : 'another program'}`,
+    detail: `This API server should answer on 127.0.0.1:${port}, but ${who} already uses that port${h?.database ? ` (an API server for the database "${h.database}")` : ''}. Requests meant for this API reach that one instead: that is why you see 404 "There is no API called …". Move this API server to a free port; its APIs, keys and public address are kept.`,
+  };
 }
 
 function audit(req, action) {
@@ -373,7 +418,11 @@ out({ ok: 1 });`,
       });
     }
   }
-  steps.push({ label: 'Checking the API answers', cmd: `sleep 2; curl -s -m 10 http://127.0.0.1:${port}/health; echo` });
+  steps.push({
+    label: 'Checking the API answers',
+    cmd: `for i in 1 2 3 4 5 6 7 8 9 10; do out=$(curl -s -m 5 http://127.0.0.1:${port}/health); [ -n "$out" ] && break; sleep 1; done; echo "$out"
+case "$out" in *'"database":${JSON.stringify(database)}'*) ;; '') echo "Nothing answers on port ${port}. Open Diagnose on the API page."; exit 1 ;; *) echo "Port ${port} is answered by a different API server. Open Diagnose on the API page and move this one to a free port."; exit 1 ;; esac`,
+  });
   audit(req, `${resume ? 'Finished setting up' : 'Created'} data API ${name} (database ${database})`);
   res.json(jobs.create(serverId, `${resume ? 'Finish setting up' : 'Create'} data API ${name}`, steps));
 });
@@ -700,6 +749,15 @@ ${pm2.whenRunning(`pm2 jlist 2>/dev/null | tail -1`, 'echo "[]"')}`,
   } catch {
     /* PM2 output not readable */
   }
+  // Not running (or not set up), yet something answers on its port: another app has it.
+  if (app.port && proc?.pm2_env?.status !== 'online') {
+    const other = await engineHealth(serverId, app.port).catch(() => ({ code: 0 }));
+    if (other.code) {
+      const c = await portClash(serverId, name, app.port, other);
+      add('port', 'bad', c.title, c.detail, 'move-port');
+      return done();
+    }
+  }
   if (!app.port || !facts.stdout.includes('HAS_MODULES') || !proc) {
     const what = !app.port ? 'it has no port yet' : !facts.stdout.includes('HAS_MODULES') ? 'its packages (npm install) are missing' : 'it is not registered in PM2';
     add('setup', 'bad', 'The setup of this API server did not finish', `It stopped part-way: ${what}. "Finish setup" continues where it stopped and keeps your APIs and keys. If it stops again at "Installing dependencies", the server could not download packages: check its internet access and free disk space.`, 'finish');
@@ -721,6 +779,12 @@ ${pm2.whenRunning(`pm2 jlist 2>/dev/null | tail -1`, 'echo "[]"')}`,
   const h = await engineHealth(serverId, app.port).catch(() => ({ code: 0 }));
   if (!h.code) {
     add('answer', 'bad', 'It does not answer', `Nothing answers on 127.0.0.1:${app.port}, although PM2 says it runs. It may be starting, or stuck. Restart it; if it stays like this, open the logs.`, 'restart');
+    return done();
+  }
+  // It answers, but as a different API server (two apps on one port).
+  if ((h.name && h.name !== name) || (h.database && h.database !== cfg.database)) {
+    const c = await portClash(serverId, name, app.port, h);
+    add('port', 'bad', c.title, c.detail, 'move-port');
     return done();
   }
   add('answer', 'ok', 'It answers', `engine v${h.engine || '?'}`);
@@ -776,6 +840,49 @@ ${pm2.whenRunning(`pm2 jlist 2>/dev/null | tail -1`, 'echo "[]"')}`,
     else add('address', 'bad', `The public address ${app.domain} does not reach it`, chk.problem || '', chk.fixable ? 'fix-address' : null);
   } else add('address', 'warn', 'Not published yet', 'Only this server can reach the API. Websites and apps elsewhere need a public address.', 'publish');
   done();
+});
+
+// Move an API server to a free port (when another app took its port). Its public address is
+// pointed at the new port, and it is started again if its setup had got that far.
+router.post('/mongo/apis/:name/move-port', async (req, res) => {
+  const serverId = req.params.id;
+  const name = apiName(req.params.name);
+  await loadConfig(serverId, name);
+  const appPath = `${dir(name)}/.serverboy-app.json`;
+  const app = JSON.parse((await readRemote(serverId, appPath)) || '{}');
+  const old = app.port;
+  const port = await freePort(serverId);
+  app.port = port;
+  await ssh.writeFile(serverId, appPath, JSON.stringify(app, null, 2), { sudo: false });
+  const changes = [`Moved from port ${old || '(none)'} to ${port}`];
+  const pm2Path = `${dir(name)}/.serverboy-pm2.json`;
+  let pm2File = null;
+  try {
+    pm2File = JSON.parse((await readRemote(serverId, pm2Path)) || 'null');
+  } catch {
+    pm2File = null;
+  }
+  if (pm2File?.apps?.[0]) {
+    pm2File.apps[0].env = { ...(pm2File.apps[0].env || {}), PORT: String(port) };
+    await ssh.writeFile(serverId, pm2Path, JSON.stringify(pm2File, null, 2), { sudo: false });
+    await ssh.exec(serverId, `chmod 600 ${q(pm2Path)}`);
+  }
+  if (app.domain) {
+    // Never take an address away from another app that uses the same one.
+    const r = await ssh.exec(serverId, `grep -l ${q(`"domain": ${JSON.stringify(app.domain)}`)} /var/www/*/.serverboy-app.json 2>/dev/null`);
+    const others = r.stdout.split('\n').map((f) => f.split('/')[3]).filter((n) => n && n !== name);
+    if (others.length) changes.push(`${app.domain} also belongs to ${others.join(', ')}, so it was left as is. Give this API server its own address (Publish)`);
+    else changes.push(...(await nginx.pointSiteToApi(serverId, app.domain, port)));
+  }
+  let started = false;
+  if (pm2File?.apps?.[0]) {
+    await pm2.ensureDaemon(serverId);
+    const r = await ssh.exec(serverId, `cd ${q(dir(name))} && pm2 delete ${q(name)} >/dev/null 2>&1; pm2 start .serverboy-pm2.json >/dev/null && pm2 save >/dev/null && echo started`);
+    started = r.stdout.includes('started');
+    if (started) changes.push('Started again');
+  }
+  audit(req, `Data API ${name}: moved to port ${port}`);
+  res.json({ ok: true, port, changes, started });
 });
 
 // Restart the API server (PM2) and its logs, for people who manage APIs but not Node Apps.

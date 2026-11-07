@@ -529,6 +529,7 @@ async function renderApi(el, ctx, svcName, slug, tab) {
       <div class="row"><button class="btn-sm" data-action="diagnose" title="Find what is wrong and what to do next">🩺 Diagnose</button><a class="btn btn-sm" href="${ctx.docsUrl(svcName, slug)}">📖 Swagger</a><button class="btn-sm" data-action="downloadDocs">⬇ .txt</button><a class="btn btn-sm" href="${ctx.svcUrl(svcName, 'settings')}" title="API server ${esc(svcName)}">⚙ Server</a></div>
     </div>
     ${info.needsUpgrade ? upgradeNotice(info) : ''}
+    ${info.status === 'online' ? '' : `<div class="notice bad" style="margin-bottom:12px"><b>The API server ${esc(svcName)} is ${esc(info.status)}</b>, so this API cannot answer${info.status === 'not running' ? ' (and anything else on its port may answer instead)' : ''}. <button class="btn-sm btn-primary" data-action="diagnose">🩺 Diagnose and fix</button></div>`}
     <div id="addr-check"></div>
     <div class="tabs">${TABS.map(([id, label]) => `<button class="${tab === id ? 'active' : ''}" data-action="tab" data-tab="${id}">${label}</button>`).join('')}</div>
     <div id="api-body"></div>`;
@@ -1219,7 +1220,7 @@ async function addressCheck(box, ctx, svcName, info, canEdit) {
 // ======================= diagnose: what is wrong, and what to do next =======================
 
 const DIAG_ICON = { ok: ['✔', 'ok'], warn: ['!', 'warn'], bad: ['✘', 'bad'], skip: ['–', ''] };
-const DIAG_BTN = { finish: 'Finish setup', restart: 'Restart it', logs: 'Open the logs', upgrade: 'Update engine', 'fix-address': 'Fix the address', publish: 'Publish on an address' };
+const DIAG_BTN = { finish: 'Finish setup', restart: 'Restart it', logs: 'Open the logs', upgrade: 'Update engine', 'fix-address': 'Fix the address', publish: 'Publish on an address', 'move-port': 'Move to a free port' };
 
 // Does a test answer look like the API server itself is broken (not just "this item does not exist")?
 export function looksBroken(status, body) {
@@ -1333,6 +1334,14 @@ export async function diagnose(ctx, svcName, slug, onChanged) {
       if (out) {
         toast(out.check?.ok ? `Fixed: ${(out.changes || []).join('. ') || 'done'}` : out.check?.problem || 'Still not reachable', out.check?.ok ? 'ok' : 'error');
         again();
+      }
+      return;
+    }
+    if (act === 'move-port') {
+      const out = await run(b, () => api(`${ctx.base}/${encodeURIComponent(svcName)}/move-port`, { method: 'POST' }));
+      if (out) {
+        toast(out.changes.join('. '), 'ok', 8000);
+        setTimeout(again, out.started ? 3000 : 0);
       }
       return;
     }

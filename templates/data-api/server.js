@@ -361,7 +361,7 @@ app.use((req, res, next) => {
 // Serverboy reads this to know the engine is up, which settings it runs (revision) and whether
 // the database answers.
 app.get('/health', async (req, res) => {
-  const info = { engine: ENGINE_VERSION, database: config.database, apis: Object.keys(config.apis || {}), revision: config.revision || null };
+  const info = { engine: ENGINE_VERSION, name: config.name || null, database: config.database, apis: Object.keys(config.apis || {}), revision: config.revision || null };
   try {
     await db().command({ ping: 1 });
     res.json({ ok: true, ...info });
