@@ -51,8 +51,37 @@ async function loadConfig(serverId, name) {
   return JSON.parse(text);
 }
 
-async function saveConfig(serverId, name, cfg) {
+// Save api.config.json. With wait, return only once the running engine has loaded it, so the
+// next request (e.g. opening the new API right after creating it) never gets an old answer.
+async function saveConfig(serverId, name, cfg, { wait = false } = {}) {
+  cfg.revision = `${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+  const savedAt = Date.now();
   await ssh.writeFile(serverId, configPath(name), `${JSON.stringify(cfg, null, 2)}\n`, { sudo: false });
+  if (wait) await waitForEngine(serverId, name, cfg, savedAt);
+}
+
+async function engineHealth(serverId, port) {
+  const r = await ssh.exec(serverId, `curl -s -m 3 -w '\n%{http_code}' http://127.0.0.1:${Number(port)}/health`, { timeout: 10000 });
+  const [body, code] = [r.stdout.slice(0, r.stdout.lastIndexOf('\n')), r.stdout.slice(r.stdout.lastIndexOf('\n') + 1).trim()];
+  try {
+    return { code: Number(code) || 0, ...JSON.parse(body) };
+  } catch {
+    return { code: Number(code) || 0 };
+  }
+}
+
+async function waitForEngine(serverId, name, cfg, savedAt) {
+  const app = JSON.parse((await readRemote(serverId, `${dir(name)}/.serverboy-app.json`)) || '{}');
+  if (!app.port) return false;
+  const slugs = Object.keys(cfg.apis || {});
+  for (let i = 0; i < 30; i++) {
+    const h = await engineHealth(serverId, app.port).catch(() => ({ code: 0 }));
+    if (!h.code) return false; // not running: nothing to wait for (Diagnose explains)
+    // Engine v4+ reports the revision it runs; older ones: wait for its poll (2 s) and the API list.
+    if (h.revision !== undefined ? h.revision === cfg.revision : Date.now() - savedAt > 2300 && slugs.every((s) => (h.apis || []).includes(s))) return true;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
 }
 
 function publicConfig(cfg) {
@@ -467,7 +496,7 @@ router.put('/mongo/apis/:name/resources/:slug', async (req, res) => {
       else if (to && to.api === old) to.api = slug;
     }
   }
-  await saveConfig(req.params.id, name, cfg);
+  await saveConfig(req.params.id, name, cfg, { wait: true });
   audit(req, `Data API ${name}: saved /api/${slug} on ${api.collection} (${API_OPS.filter((o) => api.ops[o] !== 'off').map((o) => `${o}=${api.ops[o]}`).join(', ') || 'all off'})`);
   res.json(publicConfig(cfg));
 });
@@ -478,7 +507,7 @@ router.delete('/mongo/apis/:name/resources/:slug', async (req, res) => {
   await requireMigrated(req.params.id, name, cfg);
   delete cfg.apis[req.params.slug];
   for (const k of cfg.keys || []) delete k.access?.[req.params.slug];
-  await saveConfig(req.params.id, name, cfg);
+  await saveConfig(req.params.id, name, cfg, { wait: true });
   audit(req, `Data API ${name}: deleted /api/${req.params.slug}`);
   res.json(publicConfig(cfg));
 });
@@ -496,7 +525,7 @@ router.put('/mongo/apis/:name/settings', async (req, res) => {
   cfg.cors = cors;
   cfg.rateLimitPerMinute = Math.max(0, Math.min(Number(req.body?.rateLimitPerMinute) || 0, 100000));
   cfg.maxLimit = Math.max(1, Math.min(Number(req.body?.maxLimit) || 100, 1000));
-  await saveConfig(req.params.id, name, cfg);
+  await saveConfig(req.params.id, name, cfg, { wait: true });
   audit(req, `Data API ${name}: updated settings`);
   res.json(publicConfig(cfg));
 });
@@ -527,7 +556,7 @@ router.post('/mongo/apis/:name/keys', async (req, res) => {
     createdBy: req.user.username,
   };
   cfg.keys = [...(cfg.keys || []), entry];
-  await saveConfig(req.params.id, name, cfg);
+  await saveConfig(req.params.id, name, cfg, { wait: true });
   audit(req, `Data API ${name}: created key "${label}"`);
   const { hash, ...shown } = entry;
   res.json({ ...shown, key });
@@ -539,7 +568,7 @@ router.delete('/mongo/apis/:name/keys/:keyId', async (req, res) => {
   const k = (cfg.keys || []).find((x) => x.id === req.params.keyId);
   if (!k) throw new HttpError(404, 'Key not found');
   cfg.keys = cfg.keys.filter((x) => x.id !== k.id);
-  await saveConfig(req.params.id, name, cfg);
+  await saveConfig(req.params.id, name, cfg, { wait: true });
   audit(req, `Data API ${name}: revoked key "${k.label}"`);
   res.json({ ok: true });
 });
@@ -629,6 +658,141 @@ router.all('/mongo/apis/:name/proxy/*rest', async (req, res) => {
   );
   const [text, status] = r.stdout.split('\n__SB_STATUS__');
   res.status(Number(status) || 502).type('application/json').send(text || JSON.stringify({ error: 'The API did not answer' }));
+});
+
+// ---------- Diagnose: find what is wrong with an API and say what to do next ----------
+// Checks run in order and stop at the first blocking problem. Each step:
+//   { id, status: ok | warn | bad | skip, title, detail, action?: finish | restart | logs | upgrade | fix-address | publish }
+router.get('/mongo/apis/:name/diagnose', async (req, res) => {
+  const serverId = req.params.id;
+  const name = apiName(req.params.name);
+  const slug = req.query.slug ? String(req.query.slug) : null;
+  const steps = [];
+  const add = (id, status, title, detail = '', action = null) => steps.push({ id, status, title, detail, action });
+  const done = () => res.json({ name, slug, ok: steps.every((x) => x.status === 'ok' || x.status === 'skip'), steps, next: steps.find((x) => x.status === 'bad') || steps.find((x) => x.status === 'warn') || null });
+
+  // 1. Settings file
+  let cfg;
+  const raw = await readRemote(serverId, configPath(name));
+  if (!raw) {
+    add('config', 'bad', 'The API server settings are missing', `${configPath(name)} does not exist. The API server may have been deleted, or its setup never started.`, 'finish');
+    return done();
+  }
+  try {
+    cfg = JSON.parse(raw);
+  } catch (err) {
+    add('config', 'bad', 'The settings file is damaged', `api.config.json is not valid JSON (${err.message}). Restore it from a backup, or save the API settings again.`);
+    return done();
+  }
+  add('config', 'ok', 'Settings found', `${Object.keys(cfg.apis || {}).length} API(s) for the database ${cfg.database}`);
+
+  // 2. Setup finished (port, packages, PM2 entry)
+  const app = JSON.parse((await readRemote(serverId, `${dir(name)}/.serverboy-app.json`)) || '{}');
+  const facts = await ssh.exec(
+    serverId,
+    `[ -d ${q(`${dir(name)}/node_modules/express`)} ] && [ -d ${q(`${dir(name)}/node_modules/mongodb`)} ] && echo HAS_MODULES
+${pm2.whenRunning(`pm2 jlist 2>/dev/null | tail -1`, 'echo "[]"')}`,
+    { timeout: 30000 },
+  );
+  let proc = null;
+  try {
+    proc = JSON.parse(facts.stdout.split('\n').filter((l) => l.trim().startsWith('[')).pop() || '[]').find((p) => p.name === name) || null;
+  } catch {
+    /* PM2 output not readable */
+  }
+  if (!app.port || !facts.stdout.includes('HAS_MODULES') || !proc) {
+    const what = !app.port ? 'it has no port yet' : !facts.stdout.includes('HAS_MODULES') ? 'its packages (npm install) are missing' : 'it is not registered in PM2';
+    add('setup', 'bad', 'The setup of this API server did not finish', `It stopped part-way: ${what}. "Finish setup" continues where it stopped and keeps your APIs and keys. If it stops again at "Installing dependencies", the server could not download packages: check its internet access and free disk space.`, 'finish');
+    return done();
+  }
+  add('setup', 'ok', 'Setup finished', `Runs on 127.0.0.1:${app.port}`);
+
+  // 3. Process running
+  const status = proc.pm2_env?.status;
+  if (status !== 'online') {
+    const log = await ssh.exec(serverId, `tail -n 12 ~/.pm2/logs/${q(name)}-error.log 2>/dev/null`);
+    const why = status === 'stopped' ? 'Someone stopped it (PM2 stop), or the server was restarted before PM2 saved it. Restart it.' : status === 'errored' ? 'It crashed again and again, so PM2 gave up. The last errors below say why; fix that, then restart it.' : 'It is not running.';
+    add('process', 'bad', `The API server is ${status || 'not running'}`, `${why}${log.stdout.trim() ? `\n\nLast errors:\n${log.stdout.trim()}` : ''}`, status === 'errored' && log.stdout.trim() ? 'logs' : 'restart');
+    return done();
+  }
+  add('process', 'ok', 'Running', `${proc.pm2_env?.restart_time || 0} restart(s)`);
+
+  // 4. Answers on its port, 5. database
+  const h = await engineHealth(serverId, app.port).catch(() => ({ code: 0 }));
+  if (!h.code) {
+    add('answer', 'bad', 'It does not answer', `Nothing answers on 127.0.0.1:${app.port}, although PM2 says it runs. It may be starting, or stuck. Restart it; if it stays like this, open the logs.`, 'restart');
+    return done();
+  }
+  add('answer', 'ok', 'It answers', `engine v${h.engine || '?'}`);
+  if (h.ok === false || h.code >= 500) {
+    add('database', 'bad', 'It cannot reach the database', `${h.error || `Health check answered ${h.code}.`} Is MongoDB running (Services)? If the login is wrong, "Finish setup" creates a new database user for the API server.`, 'finish');
+    return done();
+  }
+  add('database', 'ok', 'Database reachable', cfg.database);
+
+  // 6. Engine version, 7. settings loaded
+  if ((h.engine || 0) < ENGINE_VERSION) add('engine', 'warn', `Engine v${h.engine} (v${ENGINE_VERSION} is available)`, 'Updating makes changes apply instantly and adds better checks. Your APIs and keys are kept.', 'upgrade');
+  else add('engine', 'ok', `Engine v${h.engine} (latest)`);
+  const loaded = h.revision !== undefined && h.revision !== null ? h.revision === cfg.revision : Object.keys(cfg.apis || {}).every((x) => (h.apis || []).includes(x));
+  if (!loaded) add('loaded', 'warn', 'It runs older settings than the saved ones', 'It normally picks up changes within seconds. If this stays, restart it.', 'restart');
+  else add('loaded', 'ok', 'Latest settings loaded');
+
+  // 8. The API itself
+  if (slug) {
+    const a = (cfg.apis || {})[slug];
+    if (!a) {
+      const alias = cfg.legacy?.[slug];
+      add('api', 'bad', `There is no API at /api/${slug}`, alias ? `/api/${slug} is an old address for /api/${alias}.` : `This API server has: ${Object.keys(cfg.apis || {}).map((x) => `/api/${x}`).join(', ') || 'no APIs yet'}. It may have been renamed or deleted.`);
+      return done();
+    }
+    const offOps = Object.entries(a.ops || {}).filter(([, m]) => m === 'off').map(([op]) => op);
+    add('api', 'ok', `API /api/${slug} exists`, `Reads "${a.collection}"${offOps.length ? `; switched off: ${offOps.join(', ')}` : ''}`);
+    try {
+      const info = await mongosh(serverId, `const d = db.getSiblingDB(${JSON.stringify(cfg.database)}); const names = d.getCollectionNames(); out({ exists: names.includes(${JSON.stringify(a.collection)}), count: names.includes(${JSON.stringify(a.collection)}) ? d.getCollection(${JSON.stringify(a.collection)}).countDocuments() : 0, names });`);
+      if (!info.exists) {
+        const similar = info.names.filter((n) => n.toLowerCase().replace(/s$/, '') === a.collection.toLowerCase().replace(/s$/, '') && n !== a.collection);
+        add('data', 'warn', `The collection "${a.collection}" does not exist yet`, `The list will be empty until something is added.${similar.length ? ` Did you mean "${similar[0]}"? Change it in the API's Settings.` : ''}`);
+      } else if (!info.count) add('data', 'warn', `The collection "${a.collection}" is empty`, 'The API works, but has nothing to show yet. Add items in Databases or with the API.');
+      else add('data', 'ok', `${info.count} item(s) in "${a.collection}"`);
+    } catch (err) {
+      add('data', 'skip', 'Could not count the items', err.message.split('\n')[0]);
+    }
+    // 9. A real request, as the console (so key-only APIs can be checked too)
+    const env = (await readRemote(serverId, `${dir(name)}/.env`)) || '';
+    const key = (env.match(/^SB_CONSOLE_KEY=(.+)$/m) || [])[1];
+    const op = a.ops?.list && a.ops.list !== 'off' ? `/api/${slug}?limit=1` : a.ops?.count && a.ops.count !== 'off' ? `/api/${slug}/count` : null;
+    if (op) {
+      const r = await ssh.exec(serverId, `curl -s -m 10 ${key ? `-H ${q(`x-api-key: ${key.trim()}`)}` : ''} -o /dev/null -w '%{http_code}' ${q(`http://127.0.0.1:${app.port}${op}`)}`);
+      const code = Number(r.stdout.trim()) || 0;
+      if (code >= 200 && code < 300) add('request', 'ok', `A real request works`, `GET ${op} answered ${code}`);
+      else add('request', 'bad', `A real request fails (${code || 'no answer'})`, `GET ${op} did not work. ${code === 404 ? 'The engine does not know this API: restart it so it reloads its settings.' : 'Open the logs to see why.'}`, code === 404 ? 'restart' : 'logs');
+    } else add('request', 'skip', 'No read operation is switched on to test');
+  }
+
+  // 10. Public address
+  if (app.domain) {
+    const chk = await nginx.checkApiAddress(serverId, app.domain, app.port).catch((err) => ({ ok: false, problem: err.message, fixable: false }));
+    if (chk.ok) add('address', 'ok', `Public address works`, app.domain);
+    else add('address', 'bad', `The public address ${app.domain} does not reach it`, chk.problem || '', chk.fixable ? 'fix-address' : null);
+  } else add('address', 'warn', 'Not published yet', 'Only this server can reach the API. Websites and apps elsewhere need a public address.', 'publish');
+  done();
+});
+
+// Restart the API server (PM2) and its logs, for people who manage APIs but not Node Apps.
+router.post('/mongo/apis/:name/restart', async (req, res) => {
+  const name = apiName(req.params.name);
+  await loadConfig(req.params.id, name);
+  await pm2.ensureDaemon(req.params.id);
+  await ssh.exec(req.params.id, `cd ${q(dir(name))} && (pm2 restart ${q(name)} --update-env >/dev/null 2>&1 || pm2 start .serverboy-pm2.json >/dev/null) && pm2 save >/dev/null && echo ok`, { check: true });
+  audit(req, `Data API ${name}: restarted`);
+  res.json({ ok: true });
+});
+
+router.get('/mongo/apis/:name/logs', async (req, res) => {
+  const name = apiName(req.params.name);
+  await loadConfig(req.params.id, name);
+  const r = await ssh.exec(req.params.id, `tail -n 120 ~/.pm2/logs/${q(name)}-out.log ~/.pm2/logs/${q(name)}-error.log 2>&1`);
+  res.json({ log: r.stdout });
 });
 
 // Does the public address really reach the API? (Nginx is asked on the server itself.)

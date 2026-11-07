@@ -439,7 +439,30 @@ async function renderNew(el, ctx, pre) {
   });
   onAction(el, { upgrade: ({ svc }) => upgrade(ctx, svc, () => renderNew(el, ctx, pre)) });
 
+  // The API server setup failed: say where, what it usually means, and offer Try again / Diagnose.
+  async function setupFailed(job, name) {
+    const full = await api(`/servers/${ctx.server.id}/jobs/${job.id}?offset=0`).catch(() => ({ log: '' }));
+    const step = ((full.log || '').match(/▶ (.+)/g) || []).pop()?.slice(2) || '';
+    let box = f.querySelector('#new-fail');
+    if (!box) {
+      f.insertAdjacentHTML('beforeend', '<div id="new-fail"></div>');
+      box = f.querySelector('#new-fail');
+    }
+    box.innerHTML = `<div class="notice bad" style="margin-top:14px"><b>The API was not created: setting up the API server "${esc(name)}" stopped${step ? ` at <i>${esc(step)}</i>` : ''}.</b>
+      ${full.error ? `<div class="small mono" style="margin-top:4px">${esc(full.error)}</div>` : ''}
+      <div class="small" style="margin-top:6px">${esc(setupHint(step))}</div>
+      <div class="row" style="margin-top:8px"><button type="button" class="btn-sm btn-primary" data-fail="retry">Try again</button><button type="button" class="btn-sm" data-fail="diagnose">🩺 Diagnose</button><button type="button" class="btn-sm" data-fail="log">See the full log</button></div></div>`;
+    box.querySelector('[data-fail=retry]').onclick = () => {
+      box.innerHTML = '';
+      f.requestSubmit();
+    };
+    box.querySelector('[data-fail=diagnose]').onclick = () => diagnose(ctx, name, null);
+    box.querySelector('[data-fail=log]').onclick = () => showJob(ctx.server.id, job);
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
   f.addEventListener('submit', async () => {
+    f.querySelector('#new-fail')?.replaceChildren();
     const btn = f.querySelector('button.btn-primary');
     const collection = state.collection === '__new' ? f.newCollection.value.trim() : state.collection;
     if (!collection) return toast('Choose or name a collection', 'error');
@@ -458,7 +481,7 @@ async function renderNew(el, ctx, pre) {
     if (!svc) {
       const name = f.newService.value;
       const job = await run(btn, () => api(ctx.base, { method: 'POST', body: { name, database: state.db, domain: f.domain.value.trim(), https: f.https.checked } }));
-      if (job) showJob(ctx.server.id, job, { onDone: (j) => (j?.status === 'failed' ? null : save(name)) });
+      if (job) showJob(ctx.server.id, job, { onDone: (j) => (j?.status === 'failed' ? setupFailed(job, name) : save(name)) });
       return;
     }
     if (svc.needsUpgrade) return toast('Update the engine of this API server first (button above).', 'error');
@@ -488,7 +511,8 @@ async function renderApi(el, ctx, svcName, slug, tab) {
   }
   const a = info.apis?.[slug];
   if (!a) {
-    el.innerHTML = `<div class="small" style="margin-bottom:6px"><a href="${ctx.home}">← All APIs</a></div><div class="card">There is no API at /api/${esc(slug)} on ${esc(svcName)} (it may have been renamed or deleted).</div>`;
+    el.innerHTML = `<div class="small" style="margin-bottom:6px"><a href="${ctx.home}">← All APIs</a></div><div class="card">There is no API at /api/${esc(slug)} on ${esc(svcName)} (it may have been renamed or deleted). <button class="btn-sm" data-diag-missing>Diagnose</button></div>`;
+    el.querySelector('[data-diag-missing]').addEventListener('click', () => diagnose(ctx, svcName, slug, () => renderApi(el, ctx, svcName, slug, tab)));
     return;
   }
   const canEdit = (hasAll('databases') || dbAccess.find((d) => d.name === info.database)?.access === 'edit') && !info.needsUpgrade;
@@ -502,7 +526,7 @@ async function renderApi(el, ctx, svcName, slug, tab) {
         <h1>${esc(a.title)} ${info.status === 'online' ? '' : `<span class="badge bad" style="vertical-align:middle">${esc(info.status)}</span>`}${info.url ? '' : ' <span class="badge" style="vertical-align:middle" title="Only this server can reach it. Publish it in the API server settings.">private</span>'}${canEdit || info.needsUpgrade ? '' : ' <span class="badge" style="vertical-align:middle">view only</span>'}</h1>
         <div class="sub"><span class="mono">${esc(url)}</span> <button class="btn-sm btn-ghost" data-action="copyUrl" title="Copy the address">⧉</button> · <a href="#/s/${ctx.server.id}/databases/mongo">${esc(info.database)} → ${esc(a.collection)}</a></div>
       </div>
-      <div class="row"><a class="btn btn-sm" href="${ctx.docsUrl(svcName, slug)}">📖 Swagger</a><button class="btn-sm" data-action="downloadDocs">⬇ .txt</button><a class="btn btn-sm" href="${ctx.svcUrl(svcName, 'settings')}" title="API server ${esc(svcName)}">⚙ Server</a></div>
+      <div class="row"><button class="btn-sm" data-action="diagnose" title="Find what is wrong and what to do next">🩺 Diagnose</button><a class="btn btn-sm" href="${ctx.docsUrl(svcName, slug)}">📖 Swagger</a><button class="btn-sm" data-action="downloadDocs">⬇ .txt</button><a class="btn btn-sm" href="${ctx.svcUrl(svcName, 'settings')}" title="API server ${esc(svcName)}">⚙ Server</a></div>
     </div>
     ${info.needsUpgrade ? upgradeNotice(info) : ''}
     <div id="addr-check"></div>
@@ -655,7 +679,8 @@ async function renderApi(el, ctx, svcName, slug, tab) {
     if (h.reqBody) curl.push(`-H "content-type: application/json" -d '${JSON.stringify(h.reqBody).replace(/'/g, "'\\''")}'`);
     box.innerHTML = `
       <div class="pg-answer ${p.level}"><b>${esc(h.label)}</b> → <span class="badge ${h.status && h.status < 300 ? 'ok' : h.status && h.status < 500 ? 'warn' : 'bad'}">${h.status || 'no answer'}</span> <span class="small muted">${h.ms ?? ''} ms · as ${h.role === 'key' ? 'an app with a key' : 'anyone'}</span>
-        <div style="margin-top:6px">${esc(p.text)}</div></div>
+        <div style="margin-top:6px">${esc(p.text)}</div>
+        ${looksBroken(h.status, h.body) ? '<div class="row" style="margin-top:8px"><span class="small">This looks like a problem with the API server itself.</span><button class="btn-sm btn-primary" data-action="diagnose">🩺 Diagnose</button></div>' : ''}</div>
       <details style="margin-top:8px" ${h.op === 'get' ? 'open' : ''}><summary class="small"><b>Show the request and answer</b> (for developers)</summary>
         <div class="mono small" style="margin:8px 0;word-break:break-all">${esc(h.method)} ${esc(baseUrl(info))}${esc(h.path)}${h.role === 'key' ? '<br>x-api-key: (Serverboy test key)' : ''}</div>
         ${h.reqBody ? `<div class="small muted">Sent:</div><pre class="log">${esc(JSON.stringify(h.reqBody, null, 2))}</pre>` : ''}
@@ -1093,6 +1118,7 @@ async function renderApi(el, ctx, svcName, slug, tab) {
     tab: ({ tab: t }) => setTab(t),
     copyUrl: () => copy(url),
     upgrade: ({ svc }) => upgrade(ctx, svc, () => renderApi(el, ctx, svcName, slug, page.tab)),
+    diagnose: () => diagnose(ctx, svcName, slug, () => renderApi(el, ctx, svcName, slug, page.tab)),
     role: ({ role }) => {
       page.role = role;
       drawPlay();
@@ -1190,6 +1216,139 @@ async function addressCheck(box, ctx, svcName, info, canEdit) {
   });
 }
 
+// ======================= diagnose: what is wrong, and what to do next =======================
+
+const DIAG_ICON = { ok: ['✔', 'ok'], warn: ['!', 'warn'], bad: ['✘', 'bad'], skip: ['–', ''] };
+const DIAG_BTN = { finish: 'Finish setup', restart: 'Restart it', logs: 'Open the logs', upgrade: 'Update engine', 'fix-address': 'Fix the address', publish: 'Publish on an address' };
+
+// Does a test answer look like the API server itself is broken (not just "this item does not exist")?
+export function looksBroken(status, body) {
+  if (!status || status >= 500) return true;
+  const err = body && typeof body === 'object' ? String(body.error || '') : '';
+  return status === 404 && /There is no API|^Not found\. APIs:/.test(err);
+}
+
+// What a failed setup step usually means.
+function setupHint(step) {
+  if (/Node\.js|PM2/.test(step)) return 'The server could not install Node.js or PM2. Check that it can reach the internet (apt and npm) and has free disk space, then try again.';
+  if (/MongoDB user/.test(step)) return 'MongoDB did not accept the new user. Is MongoDB running (Services)? If you turned on MongoDB login, Serverboy needs the admin login saved in Databases.';
+  if (/engine|dependencies/i.test(step)) return 'Downloading the packages (npm install) failed. Usually no internet access from the server or a full disk. Try again; it continues where it stopped.';
+  if (/Publishing|HTTPS/.test(step)) return 'The API server works on the server itself; only the public address failed. Check that the domain points to this server and ports 80 / 443 are open, then use "Publish" in the API server settings.';
+  if (/answers/.test(step)) return 'The engine started but did not answer. Open Diagnose to see its errors.';
+  return 'Try again: it continues where it stopped and keeps what was already done.';
+}
+
+async function finishDialog(ctx, info, onDone) {
+  const v = await formDialog({
+    title: `Finish setting up ${info.name}`,
+    fields: [
+      { name: 'domain', label: 'Public address (optional)', value: info.domain || suggestedDomain(info.name), placeholder: 'api.example.com' },
+      { name: 'https', label: 'Get a free HTTPS certificate', type: 'checkbox', value: true },
+    ],
+    submitLabel: 'Finish setup',
+    submit: (x) => api(ctx.base, { method: 'POST', body: { name: info.name, database: info.database, domain: x.domain.trim(), https: x.https } }),
+  });
+  if (v?.id) showJob(ctx.server.id, v, { onDone });
+}
+
+async function publishDialog(ctx, info, onDone) {
+  const job = await formDialog({
+    title: `Publish ${info.name}`,
+    intro: 'Gives the API server a web address so websites and apps can use its APIs. The domain must point to this server, and ports 80 / 443 must be open in Azure.',
+    fields: [
+      { name: 'domain', label: 'Domain', value: suggestedDomain(info.name), placeholder: 'api.example.com' },
+      { name: 'https', label: 'Get a free HTTPS certificate', type: 'checkbox', value: true },
+    ],
+    submitLabel: 'Publish',
+    submit: (x) => api(`${ctx.base}/${encodeURIComponent(info.name)}/publish`, { method: 'POST', body: x }),
+  });
+  if (job?.id) showJob(ctx.server.id, job, { onDone });
+}
+
+async function showLogs(ctx, svcName) {
+  const r = await run(null, () => api(`${ctx.base}/${encodeURIComponent(svcName)}/logs`));
+  if (!r) return;
+  const body = document.createElement('div');
+  body.innerHTML = `<p class="small muted">The last lines the API server wrote (normal output and errors).</p><pre class="log" style="max-height:60vh">${esc(r.log.trim() || 'No output yet.')}</pre>`;
+  modal({ title: `Logs of ${svcName}`, wide: true, body, actions: [{ label: 'Close' }] });
+  const pre = body.querySelector('pre');
+  pre.scrollTop = pre.scrollHeight;
+}
+
+// Run the checks for one API server (and one API, when slug is given) and show them as a checklist,
+// with a button for the next thing to do. onChanged runs on close if anything was fixed.
+export async function diagnose(ctx, svcName, slug, onChanged) {
+  const box = document.createElement('div');
+  let changed = false;
+  modal({ title: slug ? `Diagnose /api/${slug}` : `Diagnose ${svcName}`, body: box, wide: true, actions: [{ label: 'Close' }], onClose: () => changed && onChanged?.() });
+  const again = () => {
+    changed = true;
+    check();
+  };
+
+  async function check() {
+    box.innerHTML = loadingHtml('Checking settings, the process, the database, the API and its address…');
+    let r;
+    try {
+      r = await api(`${ctx.base}/${encodeURIComponent(svcName)}/diagnose${slug ? `?slug=${encodeURIComponent(slug)}` : ''}`);
+    } catch (err) {
+      box.innerHTML = errorHtml(err);
+      return;
+    }
+    if (!box.isConnected) return;
+    const btn = (s, primary) => (s.action && s.status !== 'ok' ? `<button class="btn-sm ${primary ? 'btn-primary' : ''}" data-diag="${s.action}">${DIAG_BTN[s.action]}</button>` : '');
+    const n = r.next;
+    const allSteps = ['config', 'setup', 'process', 'answer', 'database'];
+    const stopped = n?.status === 'bad' && allSteps.includes(n.id);
+    box.innerHTML = `
+      ${
+        r.ok
+          ? `<div class="notice" style="background:var(--ok-soft, var(--accent-soft))"><b>✔ Everything works.</b> ${slug ? `/api/${esc(slug)} answers and reads its data.` : 'The API server runs and answers.'}</div>`
+          : `<div class="notice ${n.status === 'bad' ? 'bad' : 'warn'}"><b>${n.status === 'bad' ? 'Found the problem' : 'Works, with something to look at'}:</b> ${esc(n.title)}
+              <div class="small" style="margin-top:4px;white-space:pre-wrap">${esc(n.detail)}</div>
+              ${n.action ? `<div class="row" style="margin-top:8px"><span class="small"><b>Next step:</b></span>${btn(n, true)}</div>` : ''}</div>`
+      }
+      <div class="diag-list">${r.steps
+        .map(
+          (s) => `<div class="diag-step ${s.status}"><span class="badge ${DIAG_ICON[s.status][1]}">${DIAG_ICON[s.status][0]}</span>
+            <div class="grow"><b>${esc(s.title)}</b>${s.detail ? `<div class="small muted" style="white-space:pre-wrap">${esc(s.detail)}</div>` : ''}</div>${s.id === n?.id ? '' : btn(s)}</div>`,
+        )
+        .join('')}</div>
+      ${stopped ? '<p class="small muted" style="margin:8px 0 0">The checks stopped here: the rest depends on this one. Fix it, then check again.</p>' : ''}
+      <div class="row" style="margin-top:12px"><button class="btn-sm" data-diag="again">↻ Check again</button>${n?.action !== 'logs' ? '<button class="btn-sm btn-ghost" data-diag="logs">Logs</button>' : ''}</div>`;
+  }
+
+  box.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-diag]');
+    if (!b) return;
+    const act = b.dataset.diag;
+    if (act === 'again') return check();
+    if (act === 'logs') return showLogs(ctx, svcName);
+    if (act === 'restart') {
+      if (await run(b, () => api(`${ctx.base}/${encodeURIComponent(svcName)}/restart`, { method: 'POST' }), 'Restarted')) setTimeout(again, 2500);
+      return;
+    }
+    if (act === 'fix-address') {
+      const out = await run(b, () => api(`${ctx.base}/${encodeURIComponent(svcName)}/address-fix`, { method: 'POST' }));
+      if (out) {
+        toast(out.check?.ok ? `Fixed: ${(out.changes || []).join('. ') || 'done'}` : out.check?.problem || 'Still not reachable', out.check?.ok ? 'ok' : 'error');
+        again();
+      }
+      return;
+    }
+    if (act === 'upgrade') return upgrade(ctx, svcName, again);
+    let info;
+    try {
+      info = await ctx.info(svcName);
+    } catch (err) {
+      return toast(`${err.message}. Create the API again from the database (New API).`, 'error', 8000);
+    }
+    if (act === 'finish') finishDialog(ctx, info, again);
+    else if (act === 'publish') publishDialog(ctx, info, again);
+  });
+  check();
+}
+
 // ======================= one API server =======================
 
 async function renderService(el, ctx, svcName, startTab) {
@@ -1212,15 +1371,16 @@ async function renderService(el, ctx, svcName, startTab) {
   el.innerHTML = `
     <div class="small" style="margin-bottom:6px"><a href="${ctx.home}">← All APIs</a></div>
     <div class="page-head"><div><h1>API server: ${esc(info.name)} <span class="badge ${online ? 'ok' : 'bad'}" style="vertical-align:middle">${esc(info.status)}</span></h1>
-      <div class="sub">Answers the APIs for the database <b>${esc(info.database)}</b> · ${info.url ? `<a class="mono" href="${esc(info.url)}/health" target="_blank" rel="noopener">${esc(info.url)}</a>` : 'not published yet (private to the server)'}</div></div></div>
+      <div class="sub">Answers the APIs for the database <b>${esc(info.database)}</b> · ${info.url ? `<a class="mono" href="${esc(info.url)}/health" target="_blank" rel="noopener">${esc(info.url)}</a>` : 'not published yet (private to the server)'}</div></div>
+      <div class="row"><button class="btn-sm" data-action="diagnose" title="Find what is wrong and what to do next">🩺 Diagnose</button></div></div>
     ${info.needsUpgrade ? upgradeNotice(info) : ''}
     <div id="addr-check"></div>
     ${
       online
         ? ''
         : info.status === 'not running'
-          ? `<div class="notice warn" style="margin-bottom:12px">The setup of this API server did not finish (for example Node.js or PM2 was missing).${canEdit ? ' <button class="btn-sm btn-primary" data-action="finish">Finish setup</button>' : ''}</div>`
-          : `<div class="notice warn" style="margin-bottom:12px">The API server is ${esc(info.status)}. ${can('nodeapps') ? `See <a href="#/s/${ctx.server.id}/nodeapps">Node Apps</a> → ${esc(info.name)} → Logs.` : 'Ask the owner to check its logs.'}</div>`
+          ? `<div class="notice warn" style="margin-bottom:12px">The setup of this API server did not finish (for example Node.js or PM2 was missing).${canEdit ? ' <button class="btn-sm btn-primary" data-action="finish">Finish setup</button>' : ''} <button class="btn-sm" data-action="diagnose">Diagnose</button></div>`
+          : `<div class="notice warn" style="margin-bottom:12px">The API server is ${esc(info.status)}. ${can('nodeapps') ? `See <a href="#/s/${ctx.server.id}/nodeapps">Node Apps</a> → ${esc(info.name)} → Logs.` : 'Ask the owner to check its logs.'} <button class="btn-sm btn-primary" data-action="diagnose">Diagnose</button></div>`
     }
     <div class="tabs">${tabs.map(([id, l]) => `<button class="${startTab === id ? 'active' : ''}" data-action="stab" data-tab="${id}">${l}</button>`).join('')}</div>
     <div id="svc-body"></div>`;
@@ -1331,31 +1491,9 @@ async function renderService(el, ctx, svcName, startTab) {
         draw('keys');
       }
     },
-    publish: async () => {
-      const job = await formDialog({
-        title: `Publish ${info.name}`,
-        intro: 'Gives the API server a web address so websites and apps can use its APIs. The domain must point to this server, and ports 80 / 443 must be open in Azure.',
-        fields: [
-          { name: 'domain', label: 'Domain', value: suggestedDomain(info.name), placeholder: 'api.example.com' },
-          { name: 'https', label: 'Get a free HTTPS certificate', type: 'checkbox', value: true },
-        ],
-        submitLabel: 'Publish',
-        submit: (x) => api(`${ctx.base}/${svcName}/publish`, { method: 'POST', body: x }),
-      });
-      if (job?.id) showJob(ctx.server.id, job, { onDone: reload });
-    },
-    finish: async () => {
-      const v = await formDialog({
-        title: `Finish setting up ${info.name}`,
-        fields: [
-          { name: 'domain', label: 'Public address (optional)', value: info.domain || suggestedDomain(info.name), placeholder: 'api.example.com' },
-          { name: 'https', label: 'Get a free HTTPS certificate', type: 'checkbox', value: true },
-        ],
-        submitLabel: 'Finish setup',
-        submit: (x) => api(ctx.base, { method: 'POST', body: { name: info.name, database: info.database, domain: x.domain.trim(), https: x.https } }),
-      });
-      if (v?.id) showJob(ctx.server.id, v, { onDone: reload });
-    },
+    publish: () => publishDialog(ctx, info, reload),
+    finish: () => finishDialog(ctx, info, reload),
+    diagnose: () => diagnose(ctx, svcName, null, reload),
     deleteSvc: async () => {
       if (!(await confirmDialog(`Delete the API server ${info.name} and all its APIs and keys? Apps using them stop working. The data in ${info.database} is NOT touched.`, { danger: true, confirmLabel: 'Delete' }))) return;
       const ok = await run(null, () => api(`${ctx.base}/${svcName}`, { method: 'DELETE' }), 'API server deleted');

@@ -3,6 +3,9 @@
 import { api, esc, toast, confirmDialog } from '../ui.js';
 import { OPS, baseUrl, details, fetchFor, curlFor } from './api-docs.js';
 
+// The API server itself looks broken (no answer, a crash, or it does not know the API at all).
+const broken = (r) => !r.status || r.status >= 500 || (r.status === 404 && /There is no API|^Not found\. APIs:/.test(String(r.body?.error || '')));
+
 const WHO_SHORT = { public: '🌐 Anyone', key: '🔑 Key' };
 
 // A plain JSON body from the API's fields (what callers may send).
@@ -102,7 +105,8 @@ export function endpointTable(el, { serverId, svc, info, slug, fields, sampleId 
     const hint = r.status === 401 && as === 'public' ? ' · needs a key: switch to "with key"' : '';
     out.innerHTML = `<div class="ep-result ${ok ? 'ok' : r.status && r.status < 500 ? 'warn' : 'bad'}">
         <b>${r.status || 'no answer'}</b> <span class="muted small">${r.ms} ms · ${esc(o.method)} ${esc(path)}${hint}</span></div>
-      <pre class="log" style="max-height:320px;margin-top:6px">${esc(typeof r.body === 'string' ? r.body : JSON.stringify(r.body, null, 2))}</pre>`;
+      <pre class="log" style="max-height:320px;margin-top:6px">${esc(typeof r.body === 'string' ? r.body : JSON.stringify(r.body, null, 2))}</pre>
+      ${broken(r) ? '<div class="row small" style="margin-top:6px">This looks like a problem with the API server, not with your request. <button class="btn-sm btn-primary" data-action="diagnose">🩺 Diagnose</button></div>' : ''}`;
     // Remember a real id for the next get / update / delete test.
     const first = r.body?._id || r.body?.data?.[0]?._id;
     if (first && !sampleId) sampleId = first.$oid || first;

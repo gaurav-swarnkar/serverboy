@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { MongoClient, ObjectId, BSON } = require('mongodb');
 
-const ENGINE_VERSION = 3;
+const ENGINE_VERSION = 4;
 const CONFIG_FILE = path.join(__dirname, 'api.config.json');
 // What a key needs for each operation.
 const OPERATIONS = { list: 'read', count: 'read', get: 'read', create: 'create', update: 'update', delete: 'delete' };
@@ -27,14 +27,28 @@ function readConfig() {
 }
 
 let config = readConfig();
-fs.watchFile(CONFIG_FILE, { interval: 2000 }, () => {
+function reload() {
   try {
-    config = readConfig();
+    const next = readConfig();
+    if (next.revision && next.revision === config.revision) return;
+    config = next;
     console.log('Configuration reloaded');
   } catch (err) {
     console.error(`api.config.json is invalid, keeping the previous configuration: ${err.message}`);
   }
-});
+}
+// Reload as soon as Serverboy saves (fs.watch), with a slower poll as a fallback.
+let pending = null;
+try {
+  fs.watch(path.dirname(CONFIG_FILE), (event, file) => {
+    if (file && file !== path.basename(CONFIG_FILE)) return;
+    clearTimeout(pending);
+    pending = setTimeout(reload, 100);
+  });
+} catch {
+  /* fs.watch is not available everywhere; the poll below still works */
+}
+fs.watchFile(CONFIG_FILE, { interval: 2000 }, reload);
 
 // ---------- database ----------
 
@@ -344,9 +358,16 @@ app.use((req, res, next) => {
   next();
 });
 
+// Serverboy reads this to know the engine is up, which settings it runs (revision) and whether
+// the database answers.
 app.get('/health', async (req, res) => {
-  await db().command({ ping: 1 });
-  res.json({ ok: true, engine: ENGINE_VERSION, database: config.database, apis: Object.keys(config.apis || {}) });
+  const info = { engine: ENGINE_VERSION, database: config.database, apis: Object.keys(config.apis || {}), revision: config.revision || null };
+  try {
+    await db().command({ ping: 1 });
+    res.json({ ok: true, ...info });
+  } catch (err) {
+    res.status(503).json({ ok: false, ...info, error: `Database: ${err.message}` });
+  }
 });
 
 app.use('/api', rateLimit);

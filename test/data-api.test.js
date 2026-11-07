@@ -134,4 +134,19 @@ test('Data API engine', { skip: !URI && 'set TEST_MONGODB_URI to run (CI does)' 
     assert.equal(other.headers.get('access-control-allow-origin'), null);
     assert.equal((await call('/api/nope')).status, 404);
   });
+  await t.test('a saved change is live within seconds and /health reports its revision', async () => {
+    const h = await (await call('/health')).json();
+    assert.ok(h.engine >= 4, 'engine version in /health');
+    const next = { ...config, revision: 'rev-2', apis: { ...config.apis, notes: { title: 'Notes', collection: 'notes', ops: { list: 'public', get: 'public', count: 'public', create: 'off', update: 'off', delete: 'off' } } } };
+    fs.writeFileSync(path.join(dir, 'api.config.json'), JSON.stringify(next));
+    let live;
+    for (let i = 0; i < 40 && !live; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const x = await (await call('/health')).json();
+      if (x.revision === 'rev-2') live = x;
+    }
+    assert.ok(live, 'the engine reloaded the new settings within 4 seconds');
+    assert.ok(live.apis.includes('notes'));
+    assert.equal((await call('/api/notes')).status, 200);
+  });
 });

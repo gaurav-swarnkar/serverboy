@@ -460,6 +460,13 @@ details > summary { cursor: pointer; margin: 10px 0 6px; }
 .pg-answer.ok { border-left-color: var(--ok, #16a34a); }
 .pg-answer.warn { border-left-color: var(--warn); }
 .pg-answer.bad { border-left-color: var(--bad); }
+.diag-list { display: grid; gap: 2px; margin-top: 12px; }
+.diag-step { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; }
+.diag-step .badge { min-width: 22px; justify-content: center; text-align: center; }
+.diag-step.bad { background: var(--bad-soft); }
+.diag-step.warn { background: var(--warn-soft); }
+.diag-step.skip { opacity: .7; }
+.diag-step > .btn-sm { flex-shrink: 0; }
 .cond-row { display: grid; grid-template-columns: minmax(110px, 1fr) 140px 170px minmax(110px, 1fr) 100px auto 32px; gap: 6px; align-items: center; margin-bottom: 6px; }
 .fields-table td.c, .fields-table th { text-align: center; }
 .fields-table th:first-child, .fields-table td:first-child { text-align: left; }
