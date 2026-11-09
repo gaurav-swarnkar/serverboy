@@ -81,6 +81,10 @@ The installer installs the newest **release**. Run the same command again any ti
 
 Got a domain later? Point it at the server and run the installer with it: `curl -fsSL …/install-on-server.sh | sudo bash -s panel.example.com you@example.com`. Change the password under **Settings** in Serverboy. Forgot it? Put a new one in `ADMIN_PASSWORD=` in `/etc/serverboy.env` (`sudo nano /etc/serverboy.env`) and run `sudo systemctl restart serverboy`.
 
+## Tutorials
+
+**Learn → Tutorials** (or the **?** button at the top of any page) explains Serverboy in plain words, chapter by chapter: getting started, dashboard, **websites**, **databases**, **APIs**, Node apps, 1-click apps, files, terminal, software, backups, firewall, alerts, team, and what to do when something breaks. Websites, Databases and APIs are full step-by-step guides; each step has a button that opens the right page on your server. The chapters live in `public/js/tutorials.js`.
+
 ## Azure checklist
 
 1. Azure Portal → your VM → **Networking** → make sure inbound port **22** is allowed (ideally only from your own IP).

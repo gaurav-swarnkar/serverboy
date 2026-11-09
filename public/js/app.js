@@ -2,6 +2,7 @@ import { api, esc, toast, loadingHtml, errorHtml, session, can, viewAsToken, set
 import { startUpdateWatch, paintUnread } from './updates.js';
 import { icon, logo } from './icons.js';
 import { getTheme, setTheme, shownTheme } from './theme.js';
+import { CHAPTERS, CHAPTER_FOR_VIEW } from './tutorials.js';
 
 // Two areas:
 //   Portal  (#/servers, #/account, #/admin/...) - pick a server, your account, administration
@@ -33,6 +34,7 @@ const views = {
   jobs: () => import('./views/jobs.js'),
   backups: () => import('./views/backups.js'),
   oneclick: () => import('./views/oneclick.js'),
+  learn: () => import('./views/learn.js'),
 };
 
 // Permission each page needs (null = anyone logged in). The server enforces the same rules.
@@ -60,6 +62,7 @@ const VIEW_PERMISSION = {
   jobs: null,
   backups: 'owner',
   oneclick: 'system',
+  learn: null,
 };
 
 const SERVER_NAV = [
@@ -81,6 +84,7 @@ const PORTAL_NAV = [
       ['admin-settings', 'settings', 'Settings', '#/admin/settings'],
     ],
   ],
+  ['Learn', [['learn', 'book', 'Tutorials', '#/learn']]],
   ['Preference', [['account', 'user', 'My account', '#/account']]],
 ];
 
@@ -104,6 +108,7 @@ const PAGE_INFO = {
   people: ['Team', 'Everyone who works on these servers.'],
   messages: ['Messages', 'Talk to your team.'],
   account: ['My account', 'Your login and password.'],
+  learn: ['Tutorials', 'Learn Serverboy step by step, in plain words.'],
   'admin-users': ['Administration', 'Users, roles, activity and settings.'],
   'admin-roles': ['Administration', 'Users, roles, activity and settings.'],
   'admin-activity': ['Administration', 'Users, roles, activity and settings.'],
@@ -224,8 +229,9 @@ function renderShell(current) {
     : `<a class="side-card" href="#/people/me">${avatarOf(user, 34)}<span class="side-card-text"><b>${esc(user.name || user.username)}</b><small>${esc(user.role)}</small></span></a>`;
 
   // A helpful card at the bottom of the sidebar.
-  const helper = server && can('terminal')
-    ? `<div class="side-help">${icon('book', 26)}<b>New to servers?</b><p>The command book explains 140 everyday commands in plain English.</p><a class="btn btn-primary" href="#/s/${server.id}/terminal">Open command book ${icon('arrow', 14)}</a></div>`
+  const chapter = CHAPTER_FOR_VIEW[current.view];
+  const helper = server
+    ? `<div class="side-help">${icon('book', 26)}<b>New to servers?</b><p>Step-by-step tutorials for websites, databases, APIs and more.</p><a class="btn btn-primary" href="#/learn${chapter ? `/${chapter}` : ''}">${chapter ? 'Tutorial for this page' : 'Open tutorials'} ${icon('arrow', 14)}</a>${can('terminal') ? `<a class="small" href="#/s/${server.id}/terminal" style="margin-top:6px">or the command book</a>` : ''}</div>`
     : user.isOwner && !server
       ? `<div class="side-help">${icon('users', 26)}<b>Work as a team</b><p>Give developers their own login, with only the access they need.</p><a class="btn btn-primary" href="#/admin/users">Invite your team ${icon('arrow', 14)}</a></div>`
       : `<div class="side-help">${icon('mail', 26)}<b>Questions?</b><p>Write to the owner any time.</p><a class="btn btn-primary" href="#/messages/new">Send a message ${icon('arrow', 14)}</a></div>`;
@@ -260,7 +266,7 @@ function renderShell(current) {
           </div>
         </div>
         <a class="icon-btn" href="${user.isOwner ? '#/admin/settings' : '#/account'}" title="Settings">${icon('settings', 20)}</a>
-        <a class="icon-btn" href="https://github.com/gaurav-swarnkar/serverboy#readme" target="_blank" rel="noopener" title="Help">${icon('help', 20)}</a>
+        <a class="icon-btn" href="#/learn${chapter ? `/${chapter}` : ''}" title="${chapter ? 'Tutorial for this page' : 'Tutorials'}">${icon('help', 20)}</a>
         <a class="icon-btn topbar-bell" href="#/messages" title="Messages">${icon('mail', 20)}<span id="msg-count" class="bell-count hidden"></span></a>
         <div class="usermenu account-menu">
           <button id="user-btn" class="user-btn" aria-haspopup="true" aria-expanded="false" title="Your account">${avatarOf(user, 38)}</button>
@@ -335,6 +341,7 @@ function setupSearch(server, current) {
   if (server) add(SERVER_NAV, (v) => `#/s/${server.id}/${v}`, server.name);
   add(PORTAL_NAV, (v) => `#/${v}`, 'Serverboy');
   for (const s of state.servers) items.push({ label: s.name, ico: 'server', href: `#/s/${s.id}/dashboard`, where: `${s.username}@${s.host}`, tagline: '' });
+  for (const c of CHAPTERS) items.push({ label: `${c.title} tutorial`, ico: 'book', href: `#/learn/${c.id}`, where: 'Tutorials', tagline: c.summary });
   let shown = [];
   let pick = 0;
   const draw = () => {
@@ -413,6 +420,13 @@ async function route() {
 
   state.cleanup?.();
   state.cleanup = null;
+  if (current.serverId) {
+    try {
+      localStorage.setItem('sb-last-server', current.serverId); // tutorials open this server's pages
+    } catch {
+      /* private mode */
+    }
+  }
   const server = renderShell(current);
   paintUnread();
   const container = document.getElementById('view');
