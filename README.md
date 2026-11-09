@@ -90,7 +90,7 @@ Manage Serverboy by chatting with Claude or any other AI agent that speaks the M
   `claude mcp add --transport http serverboy https://<your-serverboy>/mcp --header "Authorization: Bearer sbt_…"`
 - **Other agents** (Cursor, Windsurf, VS Code…): add an HTTP MCP server with that URL and the `Authorization: Bearer` header.
 
-Tools (25): servers and health; websites (create, make live, HTTPS); databases, collections, find and insert documents; APIs (list, create in a website folder, Diagnose, restart); services and logs; Node apps (restart, redeploy, logs); backups; task status; a shell command (only with the Terminal permission); and `call_api` for any other Serverboy API endpoint.
+Tools (26): servers and health; websites (create, make live, HTTPS); databases, collections, find and insert documents; APIs (list, create in a website folder, Diagnose, restart); services and logs; Node apps (restart, redeploy, logs); backups; task status; a shell command (only with the Terminal permission); and `call_api` for any other Serverboy API endpoint.
 
 The AI acts as the person who connected it: same role, same website and database limits. *Only look* tokens can't change anything. Tokens can never manage tokens, passwords or "Log in as". Serverboy's self-protection still applies, and every change is in the activity log marked "(via AI: …)". Tokens are stored hashed; revoke or disconnect them on the AI connector page (the owner sees everyone's). Claude.ai needs Serverboy on **https** (the install command sets that up).
 
@@ -160,6 +160,8 @@ https://shop.com/data-k3x9/blog/posts       database blog  → collection posts
 ```
 
 Choose the website and folder when you make the first API of a database (**New API → Where should it live?**), or later under **API server → Settings → Address → Put in a website**. The APIs page shows websites → folder → groups, and **Rename folder** moves every API of a website at once. Serverboy writes the Nginx routes (`/etc/nginx/serverboy/api/<website>.conf`, included by the website) and keeps them up to date when APIs are added, renamed or deleted. The website's own pages are not touched; the folder answers JSON 404 for anything that is not an API. Two APIs can never get the same address. An API server can also stay private, or keep its own address (a sub-domain with `/api/<name>`), as before.
+
+**Several API servers, and moving APIs.** A database can have more than one API server (New API → *API server* → **+ New API server**). An API can move to another API server of the same database: API → Settings → **API server** → Move, or **Move all APIs to…** on the API server. Its settings and the keys that may use it move along (keys for "every API" are narrowed to the moved APIs); in the same website folder the address does not change. Deleting an API server offers to move its APIs first.
 
 A folder copied from an API server (for example a backup restored as `<name>-restored-<date>`) is marked as a copy on the APIs page: it gets no routes and no new APIs, and can be deleted or made separate in one click.
 

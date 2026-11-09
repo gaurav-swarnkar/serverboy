@@ -602,6 +602,78 @@ router.delete('/mongo/apis/:name/resources/:slug', async (req, res) => {
   res.json(publicConfig(cfg));
 });
 
+// ---------- move APIs to another API server ----------
+// An API can move to any other API server of the same database (each API server reads one
+// database). Its settings move with it, and so do the keys that may use it (the same key keeps
+// working: keys are stored as hashes, so the hash is copied). Keys for "every API" become keys
+// for the moved APIs only, so they never get access to the other server's APIs.
+// The source is saved first, then the target; if the target fails, the source is put back.
+async function moveApis(req, name, to, slugs) {
+  const serverId = req.params.id;
+  if (to === name) throw new HttpError(400, 'Choose another API server');
+  const src = await loadConfig(serverId, name);
+  const dst = await loadConfig(serverId, to);
+  await requireMigrated(serverId, name, src);
+  await requireMigrated(serverId, to, dst);
+  scope.requireDb(req, 'mongo', dst.database, 'edit');
+  const dstApp = JSON.parse((await readRemote(serverId, `${dir(to)}/.serverboy-app.json`)) || '{}');
+  if (mounts.isCopy({ name: to, cfg: dst, app: dstApp })) throw new HttpError(409, `${to} is a copy of another API server. Choose a real one.`);
+  if (dst.database !== src.database) throw new HttpError(409, `${to} serves the database "${dst.database}", but these APIs read "${src.database}". Move them to an API server of ${src.database} (or make a new one: + New API → API server → New API server).`);
+  const list = slugs || Object.keys(src.apis || {});
+  if (!list.length) return { moved: [] };
+  for (const slug of list) {
+    if (!src.apis?.[slug]) throw new HttpError(404, `${name} has no API "${slug}"`);
+    if (dst.apis?.[slug]) throw new HttpError(409, `${to} already has an API named "${slug}". Rename one of them first (Settings → Address name).`);
+  }
+  const before = JSON.parse(JSON.stringify(src));
+  for (const slug of list) dst.apis[slug] = src.apis[slug];
+  // Keys that may use the moved APIs.
+  dst.keys = dst.keys || [];
+  for (const k of src.keys || []) {
+    const access = {};
+    for (const slug of list) {
+      const ops = k.access?.[slug] || k.access?.['*'];
+      if (ops) access[slug] = ops;
+    }
+    if (!Object.keys(access).length) continue;
+    const same = dst.keys.find((x) => x.hash === k.hash);
+    if (same) Object.assign(same.access, access);
+    else dst.keys.push({ ...k, access });
+  }
+  for (const slug of list) {
+    delete src.apis[slug];
+    for (const k of src.keys || []) delete k.access?.[slug];
+  }
+  // A key left with no access on the old server is removed there.
+  src.keys = (src.keys || []).filter((k) => Object.keys(k.access || {}).length);
+  await saveConfig(serverId, name, src);
+  try {
+    await saveConfig(serverId, to, dst, { wait: true });
+  } catch (err) {
+    await saveConfig(serverId, name, before).catch(() => {});
+    throw err;
+  }
+  const dstPaths = mounts.pathsOf(dstApp, dst);
+  return { moved: list, to, paths: Object.fromEntries(list.map((slug) => [slug, dstPaths[slug] || `/api/${slug}`])), url: dstApp.site ? dstApp.site : dstApp.domain || null };
+}
+
+router.post('/mongo/apis/:name/resources/:slug/move', async (req, res) => {
+  const name = apiName(req.params.name);
+  const to = apiName(req.body?.to);
+  const r = await moveApis(req, name, to, [req.params.slug]);
+  audit(req, `Data API: moved /api/${req.params.slug} from ${name} to ${to}`);
+  res.json(r);
+});
+
+// Every API of an API server (for example before deleting it).
+router.post('/mongo/apis/:name/move-all', async (req, res) => {
+  const name = apiName(req.params.name);
+  const to = apiName(req.body?.to);
+  const r = await moveApis(req, name, to, null);
+  audit(req, `Data API: moved ${r.moved.length} API(s) from ${name} to ${to}`);
+  res.json(r);
+});
+
 // ---------- settings ----------
 
 router.put('/mongo/apis/:name/settings', async (req, res) => {

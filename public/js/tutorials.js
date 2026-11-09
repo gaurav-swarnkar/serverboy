@@ -246,6 +246,9 @@ export const CHAPTERS = [
           '<b>Several databases, one website</b>: APIs from different databases can share a website\'s API folder. Serverboy makes sure no two APIs get the same address.',
           '<b>Rename the folder</b>: APIs page → your website → <b>Rename folder</b>. Every API moves at once (update your website\'s code afterwards).',
           '<b>Move an API server</b>: open it (click its database name) → <b>Settings</b> → <b>Address</b> → <b>Put in a website</b>, <b>Move to another website</b> or <b>Take out of the website</b>.',
+          '<b>Several API servers</b>: when you make an API, choose its <b>API server</b>, or <b>+ New API server</b> to start another one for the same database (for example one per project or website).',
+          '<b>Move an API to another API server</b>: open the API → <b>Settings</b> → <b>API server</b> → choose one → <b>Move</b>. Its settings and keys move with it; in the same website folder its address does not change. <b>Move all APIs to…</b> on an API server moves all of them at once.',
+          '<b>Deleting an API server</b> first offers to move its APIs to another one, so nothing is lost.',
         ],
       },
       {

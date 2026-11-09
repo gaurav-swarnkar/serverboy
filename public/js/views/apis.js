@@ -207,7 +207,7 @@ async function renderHome(el, ctx) {
   const state = (s) => (s.status === 'online' ? '' : ` <span class="badge bad" title="API server ${esc(s.name)}">${esc(s.status)}</span>`);
   const apiRow = (a, svc, showState = true) => `<div class="api-row">
       <div class="grow"><a href="${ctx.apiUrl(svc.name, a.slug)}"><b>${esc(a.title)}</b></a> <span class="mono small">${esc(svc.paths?.[a.slug] || `/api/${a.slug}`)}</span>${showState ? state(svc) : ''}
-        <div class="small muted">${esc(summary(a))} · data: ${esc(svc.database)} → ${esc(a.collection)}</div></div>
+        <div class="small muted">${esc(summary(a))} · data: ${esc(svc.database)} → ${esc(a.collection)} · server ${esc(svc.name)}</div></div>
       <div class="row" style="gap:6px"><a class="btn btn-sm btn-primary" href="${ctx.apiUrl(svc.name, a.slug)}">Test</a><a class="btn btn-sm" href="${ctx.docsUrl(svc.name, a.slug)}">📖 Swagger</a><a class="btn btn-sm" href="${ctx.apiUrl(svc.name, a.slug, 'setup')}" title="Settings">⚙</a></div>
     </div>`;
 
@@ -420,6 +420,7 @@ async function renderNew(el, ctx, pre) {
     return;
   }
   // Restored backup copies are not real API servers: never add APIs to them.
+  const allServices = services;
   services = services.filter((s) => !s.broken && !s.copyOf);
   dbs = dbs.filter((d) => hasAll('databases') || d.access === 'edit');
   if (!dbs.length) {
@@ -464,9 +465,17 @@ async function renderNew(el, ctx, pre) {
     </form>`;
   const f = body.querySelector('#new-api');
   const serversFor = (db) => services.filter((s) => s.database === db);
+  // The chosen API server, or undefined for "+ New API server".
   const pickedService = () => {
     const svcs = serversFor(state.db);
+    if (f.service?.value === '__new') return undefined;
     return svcs.find((s) => s.name === f.service?.value) || svcs.find((s) => s.name === pre.service) || svcs[0];
+  };
+  // A free name for a new API server of this database: <db>-api, <db>-api-2, …
+  const freeName = () => {
+    const base = `${state.db}-api`.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 36);
+    const taken = new Set(allServices.map((s) => s.name));
+    for (let i = 1; ; i++) if (!taken.has(i === 1 ? base : `${base}-${i}`)) return i === 1 ? base : `${base}-${i}`;
   };
 
   async function loadCols() {
@@ -541,8 +550,14 @@ async function renderNew(el, ctx, pre) {
     const svcs = serversFor(state.db);
     const box = body.querySelector('#new-server');
     const svc = pickedService();
-    const name = `${state.db}-api`.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 40);
-    const pick = svcs.length > 1 ? `<label class="field"><span>Served by</span><select name="service">${svcs.map((s) => `<option ${s.name === svc?.name ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>` : '';
+    const keepName = f.newService?.value;
+    const name = keepName || freeName();
+    // Which API server answers this API: one of the database's, or a new one.
+    const pick = svcs.length
+      ? `<label class="field" style="max-width:420px"><span>API server</span><select name="service">${svcs
+          .map((s) => `<option value="${esc(s.name)}" ${s.name === svc?.name ? 'selected' : ''}>${esc(s.name)}${s.site ? ` · ${esc(s.site)}/${esc(s.folder)}` : s.domain ? ` · ${esc(s.domain)}` : ' · private'}${s.status === 'online' ? '' : ` · ${esc(s.status)}`}</option>`)
+          .join('')}<option value="__new" ${svc ? '' : 'selected'}>+ New API server…</option></select><small>APIs can move to another API server of this database later (API → Settings).</small></label>`
+      : '';
     if (svc?.needsUpgrade) {
       box.innerHTML = pick + upgradeNotice(svc);
     } else if (svc?.site) {
@@ -551,7 +566,12 @@ async function renderNew(el, ctx, pre) {
       const usable = websites.filter((w) => w.enabled);
       const firstSite = usable.find((w) => w.folder) || usable[0];
       box.innerHTML = `${pick}
-        ${svc ? '' : `<div class="notice" style="margin-top:8px">This is the first API for <b>${esc(state.db)}</b>, so Serverboy also sets up its API server (about a minute).</div><input type="hidden" name="newService" value="${esc(name)}">`}
+        ${
+          svc
+            ? ''
+            : `<div class="notice" style="margin-top:8px">${svcs.length ? 'Serverboy sets up a new API server for' : 'This is the first API for'} <b>${esc(state.db)}</b>${svcs.length ? '' : ', so Serverboy also sets up its API server'} (about a minute).</div>
+          <label class="field" style="max-width:420px"><span>Name of the new API server</span><input name="newService" class="mono" value="${esc(name)}"><small>Lowercase letters, numbers, - and _.</small></label>`
+        }
         <div class="field" style="margin-top:10px"><span>Where should it live?</span>
           <div class="where-opts">
             <label class="check"><input type="radio" name="where" value="site" ${usable.length ? 'checked' : 'disabled'}> In a website's API folder${usable.length ? '' : ` <span class="small muted">(no website yet: <a href="#/s/${ctx.server.id}/sites">create one</a>)</span>`}</label>
@@ -667,7 +687,9 @@ async function renderNew(el, ctx, pre) {
     };
     const svc = pickedService();
     if (!svc) {
-      const name = f.newService.value;
+      const name = f.newService.value.trim().toLowerCase();
+      if (!/^[a-z0-9][a-z0-9_-]{0,40}$/.test(name)) return toast('API server name: lowercase letters, numbers, - and _', 'error');
+      if (allServices.some((s) => s.name === name)) return toast(`There is already an API server named ${name}`, 'error');
       const place = w.mode === 'site' ? { site: w.site, folder: w.folder } : w.mode === 'domain' ? { domain: (w.domain || '').trim(), https: f.https.checked } : {};
       const job = await run(btn, () => api(ctx.base, { method: 'POST', body: { name, database: state.db, ...place } }));
       if (job) showJob(ctx.server.id, job, { onDone: (j) => (j?.status === 'failed' ? setupFailed(job, name) : save(name)) });
@@ -1077,8 +1099,10 @@ async function renderApi(el, ctx, svcName, slug, tab) {
       </div>
 
       <div class="save-bar"><button class="btn-primary">Save changes</button><span class="small muted">Live in about 2 seconds.</span><span class="grow"></span><button type="button" class="btn-danger" data-s="delete">Delete this API</button></div>
-      </form>`;
+      </form>
+      <div class="card" id="move-card" style="margin-top:14px"></div>`;
     const form = bodyEl.querySelector('#setup');
+    drawMove(bodyEl.querySelector('#move-card'));
     ctx.collections(info.database).then((cols) => {
       const dl = bodyEl.querySelector('#setup-cols');
       if (dl) dl.innerHTML = cols.map((c) => `<option value="${esc(c.name)}">`).join('');
@@ -1256,6 +1280,45 @@ async function renderApi(el, ctx, svcName, slug, tab) {
       sort: sortField ? `${form.sortDir.value === 'desc' ? '-' : ''}${sortField}` : '',
       limit: Number(form.limit.value) || 0,
     };
+  }
+
+  // Which API server answers this API, and moving it to another one of the same database.
+  async function drawMove(box) {
+    if (!box) return;
+    const here = info.site ? `${info.site.url}/${info.site.folder}/` : info.domain ? `https://${info.domain}` : 'private (only this server)';
+    box.innerHTML = `<h3 style="margin-top:0">API server</h3><p class="small" style="margin-top:0">Answered by <a href="${ctx.svcUrl(svcName, 'settings')}"><b>${esc(svcName)}</b></a> · ${esc(here)}</p>${loadingHtml()}`;
+    const all = await ctx.services().catch(() => []);
+    if (!box.isConnected) return;
+    const others = all.filter((s) => !s.broken && !s.copyOf && !s.needsUpgrade && s.database === info.database && s.name !== svcName);
+    const addressFor = (t) => (t.site ? `${t.site}${pathIn(t.folder, slug, a.group)}` : t.domain ? `https://${t.domain}/api/${slug}` : `private: /api/${slug}`);
+    box.querySelector('.loading')?.remove();
+    box.insertAdjacentHTML(
+      'beforeend',
+      others.length && canEdit
+        ? `<div class="row" style="gap:8px;flex-wrap:wrap"><select data-move-to style="width:auto;min-width:220px">${others.map((t) => `<option value="${esc(t.name)}">${esc(t.name)} · ${esc(t.site ? `${t.site}/${t.folder}` : t.domain || 'private')}</option>`).join('')}</select><button class="btn" data-move>Move to this API server</button></div>
+           <p class="small muted" data-move-note style="margin-bottom:0"></p>`
+        : `<p class="small muted" style="margin-bottom:0">${others.length ? 'You can view this API, but not move it.' : `To move this API, first make another API server for ${esc(info.database)}: <b>+ New API</b> → API server → <b>+ New API server</b>.`}</p>`,
+    );
+    const sel = box.querySelector('[data-move-to]');
+    if (!sel) return;
+    const note = () => {
+      const t = others.find((x) => x.name === sel.value);
+      const same = t.site && info.site && t.site === info.site.name && t.folder === info.site.folder;
+      box.querySelector('[data-move-note]').innerHTML = same
+        ? 'Same website folder: its address stays the same. Its keys move with it.'
+        : `Its address becomes <span class="mono">${esc(addressFor(t))}</span>: update the websites and apps that call it. Its keys move with it.`;
+    };
+    sel.addEventListener('change', note);
+    note();
+    box.querySelector('[data-move]').addEventListener('click', async (e) => {
+      const to = sel.value;
+      if (!(await confirmDialog(`Move the API "${a.title}" to the API server ${to}?`, { confirmLabel: 'Move' }))) return;
+      const r = await run(e.target, () => api(`${ctx.base}/${encodeURIComponent(svcName)}/resources/${encodeURIComponent(slug)}/move`, { method: 'POST', body: { to } }));
+      if (r) {
+        toast(`Moved to ${to}`, 'ok');
+        location.hash = ctx.apiUrl(to, slug, 'setup');
+      }
+    });
   }
 
   // ---------- keys ----------
@@ -1652,8 +1715,8 @@ async function renderService(el, ctx, svcName, startTab) {
             </div>
             ${
               canEdit
-                ? `<div class="card" style="margin-bottom:12px"><h3 style="margin-top:0">Maintenance</h3><div class="row"><button data-action="upgrade">Update engine</button>${online ? '' : '<button data-action="finish">Finish setup / start</button>'}${can('nodeapps') ? `<a class="btn" href="#/s/${ctx.server.id}/nodeapps">Logs in Node Apps</a>` : ''}</div></div>
-              <div class="card" style="border-color:var(--bad)"><h3 style="margin-top:0;color:var(--bad)">Danger zone</h3><p class="small">Deleting the API server deletes all ${apis.length} of its APIs and keys. The data in ${esc(info.database)} is not touched.</p><button class="btn-danger" data-action="deleteSvc">Delete API server</button></div>`
+                ? `<div class="card" style="margin-bottom:12px"><h3 style="margin-top:0">Maintenance</h3><div class="row"><button data-action="upgrade">Update engine</button>${apis.length ? '<button data-action="moveAll">Move all APIs to…</button>' : ''}${online ? '' : '<button data-action="finish">Finish setup / start</button>'}${can('nodeapps') ? `<a class="btn" href="#/s/${ctx.server.id}/nodeapps">Logs in Node Apps</a>` : ''}</div></div>
+              <div class="card" style="border-color:var(--bad)"><h3 style="margin-top:0;color:var(--bad)">Danger zone</h3><p class="small">You can move its ${apis.length} API(s) to another API server of ${esc(info.database)} first; otherwise they are deleted with it. The data in ${esc(info.database)} is not touched.</p><button class="btn-danger" data-action="deleteSvc">Delete API server</button></div>`
                 : ''
             }
           </div>
@@ -1717,10 +1780,56 @@ async function renderService(el, ctx, svcName, startTab) {
     },
     finish: () => finishDialog(ctx, info, reload),
     diagnose: () => diagnose(ctx, svcName, null, reload),
+    moveAll: async () => {
+      const others = (await ctx.services().catch(() => [])).filter((x) => !x.broken && !x.copyOf && !x.needsUpgrade && x.database === info.database && x.name !== svcName);
+      if (!others.length) return toast(`Make another API server for ${info.database} first: + New API → API server → + New API server.`, 'error', 9000);
+      const r = await formDialog({
+        title: `Move all APIs of ${info.name}`,
+        intro: `All ${Object.keys(info.apis || {}).length} API(s) and their keys move to the other API server. In the same website folder their addresses stay the same.`,
+        fields: [{ name: 'to', label: 'To the API server', type: 'select', value: others[0].name, options: others.map((o) => [o.name, `${o.name} · ${o.site ? `${o.site}/${o.folder}` : o.domain || 'private'}`]) }],
+        submitLabel: 'Move them',
+        submit: (x) => api(`${ctx.base}/${encodeURIComponent(svcName)}/move-all`, { method: 'POST', body: { to: x.to } }),
+      });
+      if (r?.moved) {
+        toast(`Moved ${r.moved.length} API(s) to ${r.to}`, 'ok');
+        location.hash = ctx.svcUrl(r.to);
+      }
+    },
     deleteSvc: async () => {
-      if (!(await confirmDialog(`Delete the API server ${info.name} and all its APIs and keys? Apps using them stop working. The data in ${info.database} is NOT touched.`, { danger: true, confirmLabel: 'Delete' }))) return;
-      const ok = await run(null, () => api(`${ctx.base}/${svcName}`, { method: 'DELETE' }), 'API server deleted');
-      if (ok) location.hash = ctx.home;
+      const apis = Object.keys(info.apis || {});
+      const others = (await ctx.services().catch(() => [])).filter((x) => !x.broken && !x.copyOf && !x.needsUpgrade && x.database === info.database && x.name !== svcName);
+      const box = document.createElement('div');
+      box.innerHTML = `<p>Delete the API server <b>${esc(info.name)}</b>? The data in ${esc(info.database)} is <b>not</b> touched.</p>
+        ${
+          apis.length && others.length
+            ? `<label class="check"><input type="radio" name="what" value="move" checked> Move its ${apis.length} API(s) and their keys to <select name="to" style="width:auto">${others.map((o) => `<option>${esc(o.name)}</option>`).join('')}</select> first (recommended)</label>
+               <label class="check"><input type="radio" name="what" value="drop"> Delete its APIs and keys too (apps using them stop working)</label>`
+            : apis.length
+              ? `<div class="notice warn">Its ${apis.length} API(s) and keys are deleted too, and apps using them stop working. To keep them, first make another API server for ${esc(info.database)} (+ New API → API server → + New API server), then move them there.</div>`
+              : ''
+        }`;
+      modal({
+        title: `Delete ${info.name}`,
+        body: box,
+        actions: [
+          { label: 'Cancel' },
+          {
+            label: 'Delete API server',
+            className: 'btn-danger',
+            onClick: async () => {
+              const move = box.querySelector('[name=what]:checked')?.value === 'move';
+              if (move) {
+                const to = box.querySelector('[name=to]').value;
+                const r = await api(`${ctx.base}/${encodeURIComponent(svcName)}/move-all`, { method: 'POST', body: { to } });
+                toast(`Moved ${r.moved.length} API(s) to ${to}`, 'ok');
+              }
+              await api(`${ctx.base}/${encodeURIComponent(svcName)}`, { method: 'DELETE' });
+              toast('API server deleted', 'ok');
+              location.hash = ctx.home;
+            },
+          },
+        ],
+      });
     },
   });
   draw(startTab);
