@@ -6,6 +6,7 @@ const nginx = require('../lib/nginx');
 const jobs = require('../lib/jobs');
 const scope = require('../lib/scope');
 const team = require('../lib/team');
+const protect = require('../lib/self-protect');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
@@ -16,6 +17,9 @@ router.get('/sites', async (req, res) => {
   r.sites = r.sites
     .filter((site) => scope.canSeeSite(req.user, req.params.id, site.name))
     .map((site) => ({ ...site, access: scope.siteLevel(req.user, req.params.id, site.name) }));
+  // The site that serves Serverboy itself (on the machine Serverboy runs on) is marked and protected.
+  const f = await protect.facts(req.params.id).catch(() => ({ self: false, sites: [] }));
+  if (f.self) for (const site of r.sites) site.serverboy = f.sites.some((s) => s.name === site.name || s.domains.includes(site.name));
   r.canCreate = scope.isAll(req.user, 'sites');
   res.json(r);
 });
@@ -40,6 +44,7 @@ router.get('/sites/:name/config', async (req, res) => {
 });
 
 router.put('/sites/:name/config', async (req, res) => {
+  await protect.checkSite(req.params.id, req.params.name, 'edited');
   const file = nginx.siteFile(req.params.name);
   const serverId = req.params.id;
   const backup = `${file}.serverboy-bak`;
@@ -56,6 +61,7 @@ router.put('/sites/:name/config', async (req, res) => {
 
 router.post('/sites/:name/toggle', async (req, res) => {
   scope.requireSite(req, req.params.name, 'edit');
+  if (!req.body?.enabled) await protect.checkSite(req.params.id, req.params.name, 'switched off');
   const file = nginx.siteFile(req.params.name);
   const link = path.join(nginx.ENABLED, path.basename(file));
   const cmd = req.body?.enabled ? `ln -sf ${q(file)} ${q(link)}` : `rm -f ${q(link)}`;
@@ -70,6 +76,7 @@ router.post('/sites/:name/test-mode', async (req, res) => {
   scope.requireSite(req, req.params.name, 'edit');
   const name = path.basename(nginx.siteFile(req.params.name));
   const on = Boolean(req.body?.on);
+  if (on) await protect.checkSite(req.params.id, name, 'put in test mode');
   if (!on && !req.user.isOwner) throw new HttpError(403, 'Only the owner (super admin) can make a website live.');
   const token = await nginx.setTestMode(req.params.id, name, on);
   team.audit({ user: req.user.username, ip: req.ip, action: on ? `Put website ${name} in test mode` : `Made website ${name} live` });
@@ -78,6 +85,7 @@ router.post('/sites/:name/test-mode', async (req, res) => {
 
 router.delete('/sites/:name', async (req, res) => {
   scope.requireSite(req, req.params.name, 'all');
+  await protect.checkSite(req.params.id, req.params.name, 'deleted');
   const file = nginx.siteFile(req.params.name);
   const name = path.basename(file);
   const serverId = req.params.id;

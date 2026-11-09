@@ -7,6 +7,7 @@ const ssh = require('../lib/ssh');
 const { can } = require('../lib/permissions');
 const nginx = require('../lib/nginx');
 const scope = require('../lib/scope');
+const protect = require('../lib/self-protect');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
@@ -126,12 +127,14 @@ router.get('/files/read', async (req, res) => {
 router.post('/files/write', async (req, res) => {
   const file = await allowed(req, req.body?.path, 'edit');
   const content = String(req.body?.content ?? '');
+  await protect.checkPaths(req.params.id, [file], 'change');
   await ssh.writeFile(req.params.id, file, Buffer.from(content, 'utf8'), { sudo: sudoOk(req) ? 'auto' : false });
   res.json({ ok: true });
 });
 
 router.post('/files/upload', upload.array('files'), async (req, res) => {
   const dir = await allowed(req, req.body?.path, 'edit');
+  await protect.checkPaths(req.params.id, [dir], 'change');
   for (const f of req.files || []) {
     // Browsers send folder-relative names for directory uploads; keep just the base name.
     const name = path.basename(Buffer.from(f.originalname, 'latin1').toString('utf8'));
@@ -161,12 +164,14 @@ router.get('/files/download', async (req, res) => {
 
 router.post('/files/mkdir', async (req, res) => {
   const dir = await allowed(req, req.body?.path, 'edit');
+  await protect.checkPaths(req.params.id, [dir], 'change');
   await run(req, `mkdir -p -- ${q(dir)}`);
   res.json({ ok: true });
 });
 
 router.post('/files/touch', async (req, res) => {
   const file = await allowed(req, req.body?.path, 'edit');
+  await protect.checkPaths(req.params.id, [file], 'change');
   await run(req, `[ -e ${q(file)} ] && { echo "File already exists" >&2; exit 1; }; touch -- ${q(file)}`);
   res.json({ ok: true });
 });
@@ -175,6 +180,8 @@ router.post('/files/rename', async (req, res) => {
   const from = await allowed(req, req.body?.from, 'edit');
   const to = await allowed(req, req.body?.to, 'edit');
   guardDangerous(from);
+  await protect.checkPaths(req.params.id, [from], 'remove');
+  await protect.checkPaths(req.params.id, [to], 'change');
   await run(req, `mv -n -- ${q(from)} ${q(to)}`);
   res.json({ ok: true });
 });
@@ -182,6 +189,7 @@ router.post('/files/rename', async (req, res) => {
 router.post('/files/copy', async (req, res) => {
   const from = await allowed(req, req.body?.from);
   const to = await allowed(req, req.body?.to, 'edit');
+  await protect.checkPaths(req.params.id, [to], 'change');
   await run(req, `cp -a -n -- ${q(from)} ${q(to)}`);
   res.json({ ok: true });
 });
@@ -191,6 +199,7 @@ router.post('/files/delete', async (req, res) => {
   for (const p of req.body?.paths || []) paths.push(await allowed(req, p, 'edit'));
   if (!paths.length) throw new HttpError(400, 'Nothing to delete');
   paths.forEach(guardDangerous);
+  await protect.checkPaths(req.params.id, paths, 'remove');
   await run(req, `rm -rf -- ${paths.map(q).join(' ')}`);
   res.json({ ok: true });
 });
@@ -200,6 +209,7 @@ router.post('/files/chmod', async (req, res) => {
   const mode = String(req.body?.mode || '');
   if (!/^[0-7]{3,4}$/.test(mode)) throw new HttpError(400, 'Mode must be octal, like 644 or 755');
   guardDangerous(target);
+  await protect.checkPaths(req.params.id, [target], req.body?.recursive ? 'remove' : 'change');
   const recursive = req.body?.recursive ? '-R ' : '';
   await run(req, `chmod ${recursive}${mode} -- ${q(target)}`);
   res.json({ ok: true });
@@ -211,6 +221,7 @@ router.post('/files/chown', async (req, res) => {
   const owner = String(req.body?.owner || '');
   if (!/^[a-z_][a-z0-9_-]*(:[a-z_][a-z0-9_-]*)?$/i.test(owner)) throw new HttpError(400, 'Owner must look like user or user:group');
   guardDangerous(target);
+  await protect.checkPaths(req.params.id, [target], req.body?.recursive ? 'remove' : 'change');
   const recursive = req.body?.recursive ? '-R ' : '';
   await ssh.exec(req.params.id, `chown ${recursive}${q(owner)} -- ${q(target)}`, { sudo: true, check: true });
   res.json({ ok: true });
@@ -220,6 +231,7 @@ router.post('/files/chown', async (req, res) => {
 router.post('/files/extract', async (req, res) => {
   const file = await allowed(req, req.body?.path, 'edit');
   const dest = path.dirname(file);
+  await protect.checkPaths(req.params.id, [dest], 'change');
   let cmd;
   if (/\.zip$/i.test(file)) {
     cmd = sudoOk(req)
@@ -237,6 +249,7 @@ router.post('/files/compress', async (req, res) => {
   const target = await allowed(req, req.body?.path);
   const name = path.basename(target);
   const out = await allowed(req, `${target}.tar.gz`, 'edit');
+  await protect.checkPaths(req.params.id, [out], 'change');
   await run(req, `tar -czf ${q(out)} -C ${q(path.dirname(target))} ${q(name)}`, { timeout: 10 * 60 * 1000 });
   res.json({ ok: true, path: out });
 });

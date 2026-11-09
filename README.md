@@ -227,6 +227,16 @@ If you'd rather reach Serverboy from anywhere, run it **on the server** and put 
 
 Never expose it over plain HTTP. Add the server to itself with host `127.0.0.1`.
 
+**Serverboy protects itself.** On the machine it runs on (recognised by `/etc/machine-id`), Serverboy refuses actions that would take it offline:
+
+- **Websites:** the site that serves Serverboy's address is marked *🛡 Serverboy itself* and cannot be deleted, disabled, put in test mode or edited (Enable SSL still works). No other website, API or 1-click app can take over its address.
+- **File Manager:** Serverboy's program folder, its data folder, `/etc/serverboy.env`, its systemd service, the Node.js program, its Nginx site files and its HTTPS certificate cannot be deleted, moved, overwritten or re-permissioned. Neither can a folder that contains them, such as `/opt`.
+- **Services and processes:** Serverboy and Nginx cannot be stopped or disabled (Restart works). Their processes cannot be killed.
+- **Software:** Node.js, Nginx and certbot cannot be uninstalled, also not by removing a package that would take them along.
+- **Firewall:** ports 80 and 443 cannot be blocked, and the last rule that opens them cannot be deleted. Turning the firewall on also opens them.
+
+On **every** server, the SSH service and the last firewall rule for the SSH port are protected the same way, because Serverboy works over SSH. The **Terminal** is not limited: it is a full shell on purpose. If something does break, run the install command again on the server (Azure portal → Run command, or SSH): it repairs Serverboy and keeps your data.
+
 ## Development, tests and releases
 
 ```bash

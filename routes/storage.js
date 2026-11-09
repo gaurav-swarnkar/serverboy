@@ -2,6 +2,7 @@
 // is still used. Everything here needs the "system" permission (lib/permissions.js).
 const express = require('express');
 const ssh = require('../lib/ssh');
+const protect = require('../lib/self-protect');
 const jobs = require('../lib/jobs');
 const catalog = require('../lib/catalog');
 const team = require('../lib/team');
@@ -341,6 +342,7 @@ router.post('/storage/packages/preview', async (req, res) => {
 router.post('/storage/packages/remove', async (req, res) => {
   const name = String(req.body?.name || '').trim();
   const plan = await removalPlan(req.params.id, name);
+  await protect.checkPackages(req.params.id, plan.packages.map((x) => x.name));
   if (plan.blocked.length) throw new HttpError(400, `Removing ${name} would also remove ${plan.blocked.join(', ')}, which the system needs. Not removed.`);
   team.audit({ user: req.user.username, ip: req.ip, action: `Removed package ${name} (${plan.packages.map((x) => x.name).join(', ')})` });
   res.json(

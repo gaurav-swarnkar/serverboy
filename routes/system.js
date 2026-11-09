@@ -4,6 +4,7 @@ const ssh = require('../lib/ssh');
 const pm2 = require('../lib/pm2');
 const jobs = require('../lib/jobs');
 const catalog = require('../lib/catalog');
+const protect = require('../lib/self-protect');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
@@ -98,6 +99,7 @@ router.get('/stats', async (req, res) => {
 router.post('/processes/:pid/kill', async (req, res) => {
   const pid = Number(req.params.pid);
   if (!Number.isInteger(pid) || pid < 2) throw new HttpError(400, 'Invalid PID');
+  await protect.checkProcess(req.params.id, pid);
   const signal = req.body?.force ? 'KILL' : 'TERM';
   await ssh.execMaybeSudo(req.params.id, `kill -${signal} ${pid}`, { check: true });
   res.json({ ok: true });
@@ -155,6 +157,7 @@ router.post('/services/:name/:action', async (req, res) => {
   if (!SERVICE_RE.test(name)) throw new HttpError(400, 'Invalid service name');
   if (!['start', 'stop', 'restart', 'reload', 'enable', 'disable'].includes(action)) throw new HttpError(400, 'Invalid action');
   const unit = name.replace(/\.service$/, '');
+  await protect.checkService(req.params.id, unit, action);
   if (/^pm2-/.test(unit) && (action === 'start' || action === 'restart')) {
     // A PM2 started outside systemd (by "pm2 start" in a terminal) makes a plain start fail;
     // take it over instead (lib/pm2.js).
@@ -200,7 +203,7 @@ router.get('/apps', async (req, res) => {
   );
 });
 
-router.post('/apps/:appId/:action', (req, res) => {
+router.post('/apps/:appId/:action', async (req, res) => {
   const app = catalog.find(req.params.appId);
   if (!app) throw new HttpError(404, 'Unknown app');
   const { action } = req.params;
@@ -208,6 +211,7 @@ router.post('/apps/:appId/:action', (req, res) => {
     return res.json(jobs.create(req.params.id, `Install ${app.name}`, [{ label: `Installing ${app.name}`, cmd: app.install, sudo: true }]));
   }
   if (action === 'uninstall' && app.uninstall) {
+    await protect.checkAppUninstall(req.params.id, app.id);
     return res.json(jobs.create(req.params.id, `Uninstall ${app.name}`, [{ label: `Removing ${app.name}`, cmd: app.uninstall, sudo: true }]));
   }
   throw new HttpError(400, 'Invalid action');
@@ -235,7 +239,7 @@ router.get('/packages/search', async (req, res) => {
   );
 });
 
-router.post('/packages/:action', (req, res) => {
+router.post('/packages/:action', async (req, res) => {
   const name = String(req.body?.name || '').trim();
   if (!PACKAGE_RE.test(name)) throw new HttpError(400, 'Invalid package name');
   const { action } = req.params;
@@ -243,6 +247,7 @@ router.post('/packages/:action', (req, res) => {
     return res.json(jobs.create(req.params.id, `apt install ${name}`, [{ label: `Installing ${name}`, cmd: `apt-get update -y && apt-get install -y ${q(name)}`, sudo: true }]));
   }
   if (action === 'remove') {
+    await protect.checkPackageRemoval(req.params.id, name);
     return res.json(jobs.create(req.params.id, `apt remove ${name}`, [{ label: `Removing ${name}`, cmd: `apt-get remove -y ${q(name)}`, sudo: true }]));
   }
   throw new HttpError(400, 'Invalid action');
@@ -250,17 +255,22 @@ router.post('/packages/:action', (req, res) => {
 
 // ---------- Firewall (ufw) ----------
 
-router.get('/firewall', async (req, res) => {
-  const r = await ssh.exec(req.params.id, 'command -v ufw >/dev/null || { echo NOT_INSTALLED; exit 0; }; ufw status numbered', { sudo: true });
+async function firewallStatus(serverId) {
+  const r = await ssh.exec(serverId, 'command -v ufw >/dev/null || { echo NOT_INSTALLED; exit 0; }; ufw status numbered', { sudo: true });
   const out = r.stdout.trim();
-  if (out.includes('NOT_INSTALLED')) return res.json({ installed: false, active: false, rules: [] });
+  if (out.includes('NOT_INSTALLED')) return { installed: false, active: false, rules: [] };
   const active = /Status: active/.test(out);
   const rules = [];
   for (const line of out.split('\n')) {
     const m = line.match(/^\[\s*(\d+)\]\s+(.+?)\s{2,}(ALLOW|DENY|REJECT|LIMIT)\s+(IN|OUT|FWD)?\s*(.*)$/);
     if (m) rules.push({ num: Number(m[1]), to: m[2].trim(), action: m[3], direction: m[4] || 'IN', from: m[5].trim() });
   }
-  res.json({ installed: true, active, rules });
+  return { installed: true, active, rules };
+}
+const firewallRules = async (serverId) => (await firewallStatus(serverId)).rules;
+
+router.get('/firewall', async (req, res) => {
+  res.json(await firewallStatus(req.params.id));
 });
 
 router.post('/firewall/rule', async (req, res) => {
@@ -271,6 +281,7 @@ router.post('/firewall/rule', async (req, res) => {
   }
   if (!['tcp', 'udp', 'any'].includes(proto)) throw new HttpError(400, 'Invalid protocol');
   if (from && !/^[0-9a-fA-F.:/]+$/.test(from)) throw new HttpError(400, 'Source must be an IP or CIDR');
+  await protect.checkFirewallRule(req.params.id, { action, port: String(port), from });
   const isProfile = !/^\d/.test(String(port));
   let cmd;
   if (from) {
@@ -285,6 +296,7 @@ router.post('/firewall/rule', async (req, res) => {
 router.delete('/firewall/rule/:num', async (req, res) => {
   const num = Number(req.params.num);
   if (!Number.isInteger(num) || num < 1) throw new HttpError(400, 'Invalid rule number');
+  await protect.checkFirewallDelete(req.params.id, await firewallRules(req.params.id), num);
   await ssh.exec(req.params.id, `ufw --force delete ${num}`, { sudo: true, check: true });
   res.json({ ok: true });
 });
@@ -294,7 +306,9 @@ router.post('/firewall/:state', async (req, res) => {
   if (state === 'enable') {
     // Never lock ourselves out: always keep the current SSH port open first.
     const entry = await ssh.connect(req.params.id);
-    await ssh.exec(req.params.id, `ufw allow ${Number(entry.server.port)}/tcp && ufw --force enable`, { sudo: true, check: true });
+    // On the machine Serverboy runs on, keep its web address reachable too.
+    const web = (await protect.facts(req.params.id)).self ? ' && ufw allow 80/tcp && ufw allow 443/tcp' : '';
+    await ssh.exec(req.params.id, `ufw allow ${Number(entry.server.port)}/tcp${web} && ufw --force enable`, { sudo: true, check: true });
   } else if (state === 'disable') {
     await ssh.exec(req.params.id, 'ufw disable', { sudo: true, check: true });
   } else throw new HttpError(400, 'Invalid state');

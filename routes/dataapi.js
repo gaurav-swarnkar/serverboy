@@ -1051,7 +1051,8 @@ router.delete('/mongo/apis/:name', async (req, res) => {
   await mongosh(serverId, `const d = db.getSiblingDB(${JSON.stringify(cfg.database)}); if (d.getUser(${JSON.stringify(dbUser)})) d.dropUser(${JSON.stringify(dbUser)}); out({ ok: 1 });`).catch(() => {});
   let cmd = `rm -rf -- ${q(dir(name))}`;
   const shared = app.domain ? (await ssh.exec(serverId, `grep -l ${q(`"domain": ${JSON.stringify(app.domain)}`)} /var/www/*/.serverboy-app.json 2>/dev/null`)).stdout.split('\n').some((f) => f.split('/')[3] && f.split('/')[3] !== name) : false;
-  if (app.domain && !shared) cmd += ` && rm -f ${q(`/etc/nginx/sites-enabled/${app.domain}`)} ${q(`/etc/nginx/sites-available/${app.domain}`)} && (nginx -t && systemctl reload nginx || true)`;
+  const own = app.domain ? await require('../lib/self-protect').isOwnSite(serverId, app.domain) : false;
+  if (app.domain && !shared && !own) cmd += ` && rm -f ${q(`/etc/nginx/sites-enabled/${app.domain}`)} ${q(`/etc/nginx/sites-available/${app.domain}`)} && (nginx -t && systemctl reload nginx || true)`;
   await ssh.exec(serverId, cmd, { sudo: true, check: true });
   audit(req, `Deleted data API ${name} (the data in ${cfg.database} was not touched)`);
   res.json({ ok: true });

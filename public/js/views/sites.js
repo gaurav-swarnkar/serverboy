@@ -30,18 +30,18 @@ export async function render(el, { server }) {
         <tbody>${sites
           .map(
             (s, i) => `<tr>
-            <td><b>${esc(s.name)}</b><div class="small muted">${s.serverNames.map(esc).join(', ')}</div></td>
+            <td><b>${esc(s.name)}</b>${s.serverboy ? ' <span class="badge accent" title="This address serves Serverboy. It is protected: it cannot be deleted, disabled, put in test mode or edited here.">🛡 Serverboy itself</span>' : ''}<div class="small muted">${s.serverNames.map(esc).join(', ')}</div></td>
             <td class="mono small">${s.proxy ? `→ ${esc(s.proxy)}` : esc(s.root || '')}</td>
             <td>${!s.enabled ? '<span class="badge">disabled</span>' : s.testMode ? '<span class="badge warn" title="Only people with the preview link can see it">test mode</span>' : '<span class="badge ok">live</span>'}</td>
             <td>${s.ssl ? '<span class="badge ok">https</span>' : s.access === 'view' ? '<span class="badge">no SSL</span>' : `<button class="btn-sm" data-action="ssl" data-i="${i}">Enable SSL</button>`}</td>
             <td class="actions">
               ${s.serverNames[0] && s.serverNames[0] !== '_' ? (s.testMode ? `<a class="btn btn-sm" href="${esc(previewUrl(s))}" target="_blank" rel="noopener" title="Opens the site with the preview link">Preview</a><button class="btn-sm" data-action="copyPreview" data-i="${i}" title="Copy the preview link to share">⧉ Link</button>` : `<a class="btn btn-sm" href="${s.ssl ? 'https' : 'http'}://${esc(s.serverNames[0])}" target="_blank" rel="noopener">Visit</a>`) : ''}
               ${s.testMode && can('owner') && s.enabled ? `<button class="btn-sm btn-primary" data-action="goLive" data-i="${i}">Make live</button>` : ''}
-              ${!s.testMode && s.access !== 'view' && s.enabled && s.serverNames[0] !== '_' ? `<button class="btn-sm" data-action="testMode" data-i="${i}" title="Hide it behind the preview link again">Test mode</button>` : ''}
+              ${!s.serverboy && !s.testMode && s.access !== 'view' && s.enabled && s.serverNames[0] !== '_' ? `<button class="btn-sm" data-action="testMode" data-i="${i}" title="Hide it behind the preview link again">Test mode</button>` : ''}
               ${s.root ? `<button class="btn-sm" data-action="files" data-root="${esc(s.root)}">Files</button>` : ''}
               <button class="btn-sm" data-action="config" data-i="${i}">Config</button>
-              ${s.access === 'view' ? '<span class="badge">view only</span>' : `<button class="btn-sm" data-action="toggle" data-i="${i}">${s.enabled ? 'Disable' : 'Enable'}</button>`}
-              ${hasAll('sites') ? `<button class="btn-sm btn-danger" data-action="remove" data-i="${i}">Delete</button>` : ''}
+              ${s.serverboy ? '' : s.access === 'view' ? '<span class="badge">view only</span>' : `<button class="btn-sm" data-action="toggle" data-i="${i}">${s.enabled ? 'Disable' : 'Enable'}</button>`}
+              ${hasAll('sites') && !s.serverboy ? `<button class="btn-sm btn-danger" data-action="remove" data-i="${i}">Delete</button>` : ''}
             </td></tr>`,
           )
           .join('')}
@@ -107,8 +107,11 @@ export async function render(el, { server }) {
         return toast(err.message, 'error');
       }
       const body = document.createElement('div');
-      body.innerHTML = `<textarea spellcheck="false" style="width:100%;height:60vh;white-space:pre" ${can('owner') ? '' : 'readonly'}></textarea><p class="small muted">${
-        can('owner')
+      const editable = can('owner') && !s.serverboy;
+      body.innerHTML = `<textarea spellcheck="false" style="width:100%;height:60vh;white-space:pre" ${editable ? '' : 'readonly'}></textarea><p class="small muted">${
+        s.serverboy
+          ? 'Read-only: this site serves Serverboy itself, so it is protected from changes here.'
+          : can('owner')
           ? 'Saved changes are tested with <span class="mono">nginx -t</span> and rolled back automatically if invalid.'
           : 'Read-only: only the owner can edit raw Nginx configuration.'
       }</p>`;
@@ -117,7 +120,7 @@ export async function render(el, { server }) {
         title: `Nginx config: ${s.name}`,
         wide: true,
         body,
-        actions: can('owner') ? [
+        actions: editable ? [
           { label: 'Cancel' },
           {
             label: 'Save & reload',
