@@ -10,7 +10,7 @@ export function loadApiServices(server) {
 }
 
 export function apisFor(services, db, col) {
-  return services.filter((s) => !s.broken && s.database === db).flatMap((s) => s.apis.filter((a) => a.collection === col).map((a) => ({ ...a, svc: s })));
+  return services.filter((s) => !s.broken && !s.copyOf && s.database === db).flatMap((s) => s.apis.filter((a) => a.collection === col).map((a) => ({ ...a, svc: s })));
 }
 
 // ======================= APIs tab =======================
@@ -34,7 +34,7 @@ export async function mountCollectionApis(el, server, db, col, canEdit, services
             ? list
                 .map(
                   (a, i) => `<div class="api-row">
-                  <div class="grow"><a href="${page(a.svc.name, a.slug)}"><b>${esc(a.title)}</b></a> <span class="mono small muted">${esc(a.svc.domain ? `https://${a.svc.domain}` : '')}/api/${esc(a.slug)}</span>
+                  <div class="grow"><a href="${page(a.svc.name, a.slug)}"><b>${esc(a.title)}</b></a> <span class="mono small muted">${esc(a.svc.site ? a.svc.site : a.svc.domain ? `https://${a.svc.domain}` : '')}${esc(a.svc.paths?.[a.slug] || `/api/${a.slug}`)}</span>
                     <div class="small muted">${esc(summary(a))}</div></div>
                   <div class="row" style="gap:6px"><button class="btn-sm btn-primary" data-endpoints="${i}">Endpoints ▾</button><a class="btn btn-sm" href="${docs(a.svc.name, a.slug)}">📖 Swagger</a>${canEdit ? `<a class="btn btn-sm" href="${page(a.svc.name, a.slug, 'setup')}">⚙</a>` : ''}</div>
                 </div><div class="api-row-endpoints hidden" data-endpoints-box="${i}"></div>`,

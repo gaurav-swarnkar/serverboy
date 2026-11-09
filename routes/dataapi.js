@@ -16,6 +16,7 @@ const { can } = require('../lib/permissions');
 const scope = require('../lib/scope');
 const pm2 = require('../lib/pm2');
 const openapi = require('../lib/openapi');
+const mounts = require('../lib/api-mounts');
 
 const { q, HttpError } = ssh;
 const router = express.Router({ mergeParams: true });
@@ -55,9 +56,15 @@ async function loadConfig(serverId, name) {
 // next request (e.g. opening the new API right after creating it) never gets an old answer.
 async function saveConfig(serverId, name, cfg, { wait = false } = {}) {
   cfg.revision = `${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+  // An API server in a website folder: no two APIs may get the same address there.
+  const app = JSON.parse((await readRemote(serverId, `${dir(name)}/.serverboy-app.json`)) || '{}');
+  const mounted = app.site && app.folder ? app : null;
+  if (mounted) await mounts.check(serverId, app.site, { name, cfg, app });
   const savedAt = Date.now();
   await ssh.writeFile(serverId, configPath(name), `${JSON.stringify(cfg, null, 2)}\n`, { sudo: false });
   if (wait) await waitForEngine(serverId, name, cfg, savedAt);
+  // Then the website's routes, so new or renamed APIs answer at their address right away.
+  if (mounted) await mounts.sync(serverId, app.site);
 }
 
 async function engineHealth(serverId, port) {
@@ -272,13 +279,18 @@ echo "##PM2"; command -v pm2 >/dev/null && ${pm2.whenRunning('pm2 jlist 2>/dev/n
       const cfg = JSON.parse(head.slice(nl + 1));
       const app = appJson && appJson.trim() ? JSON.parse(appJson) : {};
       const proc = procs.find((p) => p.name === name);
+      const full = migrate(cfg);
       apis.push({
         name,
         database: cfg.database,
         port: app.port || null,
         domain: app.domain || null,
+        site: app.site || null,
+        folder: app.folder || null,
+        paths: mounts.pathsOf(app, full),
+        copyOf: mounts.isCopy({ name, cfg, app }) ? cfg.name || app.name || name.replace(/-restored-\d{8}-\d{6}$/, '') : null,
         status: proc ? proc.pm2_env?.status : 'not running',
-        apis: Object.entries(migrate(cfg).apis).map(([slug, a]) => ({ slug, title: a.title, collection: a.collection, group: a.group, description: a.description, ops: a.ops })),
+        apis: Object.entries(full.apis).map(([slug, a]) => ({ slug, title: a.title, collection: a.collection, group: a.group, description: a.description, ops: a.ops })),
         needsUpgrade: !isMigrated(cfg),
         keys: (cfg.keys || []).length,
       });
@@ -311,12 +323,22 @@ router.get('/mongo/apis/:name', async (req, res) => {
     /* keep default */
   }
   const https = rest.join('').includes('/etc/nginx');
+  const full = migrate(cfg);
+  // In a website folder: that is the address websites and apps use.
+  let site = null;
+  if (app.site) {
+    const s = (await nginx.listSites(req.params.id)).sites.find((x) => x.name === app.site);
+    site = { name: app.site, folder: app.folder, exists: Boolean(s), ssl: Boolean(s?.ssl), testMode: Boolean(s?.testMode), url: `${s?.ssl ? 'https' : 'http'}://${app.site}` };
+  }
   res.json({
-    ...publicConfig(migrate(cfg)),
+    ...publicConfig(full),
     needsUpgrade: !isMigrated(cfg),
     port: app.port,
     domain: app.domain || null,
-    url: app.domain ? `${https ? 'https' : 'http'}://${app.domain}` : null,
+    site,
+    paths: mounts.pathsOf(app, full),
+    copyOf: mounts.isCopy({ name, cfg, app }) ? cfg.name || app.name || name.replace(/-restored-\d{8}-\d{6}$/, '') : null,
+    url: site ? site.url : app.domain ? `${https ? 'https' : 'http'}://${app.domain}` : null,
     status,
     engine,
     latestEngine: ENGINE_VERSION,
@@ -329,6 +351,9 @@ router.post('/mongo/apis', async (req, res) => {
   const serverId = req.params.id;
   const name = apiName(req.body?.name);
   const domain = req.body?.domain ? nginx.validDomain(req.body.domain) : null;
+  // Or inside a website, in its API folder (https://<site>/<folder>/…).
+  let site = req.body?.site ? nginx.validDomain(req.body.site) : null;
+  let folder = site ? mounts.folderName(req.body?.folder) : null;
 
   // Check everything first, so a missing requirement never leaves a half-made API behind.
   const pre = await ssh.exec(
@@ -348,6 +373,12 @@ command -v pm2 >/dev/null && ${pm2.whenRunning(`pm2 jlist 2>/dev/null | grep -qF
   const database = previous?.database || String(req.body?.database || '').trim();
   if (!DB_RE.test(database)) throw new HttpError(400, 'Invalid database name');
   scope.requireDb(req, 'mongo', database, 'edit');
+  if (site) {
+    scope.requireSite(req, site, 'edit');
+    const w = (await mounts.websites(serverId)).find((x) => x.name === site);
+    if (!w) throw new HttpError(404, `There is no website ${site} on this server (or it is Serverboy itself).`);
+    if (w.folder && w.folder !== folder) folder = w.folder; // a website has one API folder
+  }
 
   const prereqSteps = [];
   if (!has('HAS_NODE') || !has('HAS_NPM') || !has('HAS_PM2')) {
@@ -360,6 +391,7 @@ command -v pm2 >/dev/null && ${pm2.whenRunning(`pm2 jlist 2>/dev/null | grep -qF
   }
 
   const app = resume ? JSON.parse((await readRemote(serverId, `${dir(name)}/.serverboy-app.json`)) || '{}') : {};
+  if (!site && app.site) [site, folder] = [app.site, app.folder];
   const port = app.port || (await freePort(serverId));
   const dbUser = `api_${name.replace(/-/g, '_')}`;
   const dbPassword = crypto.randomBytes(24).toString('base64url');
@@ -374,7 +406,7 @@ command -v pm2 >/dev/null && ${pm2.whenRunning(`pm2 jlist 2>/dev/null | grep -qF
     apis: {},
     keys: [],
   };
-  const cfg = { name, repo: '', branch: 'main', port, installCmd: '', buildCmd: '', startCmd: 'node server.js', domain };
+  const cfg = { name, repo: '', branch: 'main', port, installCmd: '', buildCmd: '', startCmd: 'node server.js', domain, ...(site ? { site, folder } : {}) };
   const envText = `MONGODB_URI=${mongoUri}\nSB_CONSOLE_KEY=${consoleKey}\n`;
   const steps = buildSteps(serverId, cfg, { envText, fresh: true });
   steps.unshift(...prereqSteps);
@@ -417,6 +449,15 @@ out({ ok: 1 });`,
         cmd: `command -v certbot >/dev/null || { apt-get update -y && apt-get install -y certbot python3-certbot-nginx; }; certbot --nginx --non-interactive --agree-tos --register-unsafely-without-email --redirect -d ${q(domain)}`,
       });
     }
+  }
+  if (site) {
+    steps.push({
+      label: `Adding the API folder /${folder} to ${site}`,
+      fn: async (log) => {
+        const r = await mounts.sync(serverId, site);
+        log(`APIs of this server answer at ${r.ssl ? 'https' : 'http'}://${site}/${folder}/…${r.testMode ? `\nNote: ${site} is in test mode, so the internet gets "Coming soon" until the owner makes it live (Websites).` : ''}\n`);
+      },
+    });
   }
   steps.push({
     label: 'Checking the API answers',
@@ -679,8 +720,12 @@ out(Object.fromEntries(${JSON.stringify(cols)}.map((c) => [c, d.getCollection(c)
   // "Try it out" works best through Serverboy (also before publishing); the public address is
   // what websites and apps use, so a downloaded spec lists that first.
   const servers = [{ url: `/api/servers/${req.params.id}/mongo/apis/${name}/proxy`, description: 'Through Serverboy (for trying it out here)' }];
-  if (app.domain) servers[req.query.download ? 'unshift' : 'push']({ url: `${https ? 'https' : 'http'}://${app.domain}`, description: 'Public address (what websites and apps use)' });
-  const spec = openapi.build({ info: cfg, slugs, samples, servers });
+  const paths = mounts.pathsOf(app, cfg);
+  if (app.site) {
+    const ssl = (await ssh.exec(req.params.id, `grep -l 'ssl_certificate' /etc/nginx/sites-enabled/${q(app.site)} 2>/dev/null`)).stdout.includes('/etc/nginx');
+    servers[req.query.download ? 'unshift' : 'push']({ url: `${ssl ? 'https' : 'http'}://${app.site}`, description: 'Public address (what websites and apps use)' });
+  } else if (app.domain) servers[req.query.download ? 'unshift' : 'push']({ url: `${https ? 'https' : 'http'}://${app.domain}`, description: 'Public address (what websites and apps use)' });
+  const spec = openapi.build({ info: cfg, slugs, samples, servers, pathOf: (slug) => paths[slug] || `/api/${slug}` });
   if (req.query.download) res.setHeader('Content-Disposition', `attachment; filename="${slugs?.length === 1 ? slugs[0] : name}-openapi.json"`);
   res.json(spec);
 });
@@ -693,9 +738,10 @@ router.all('/mongo/apis/:name/proxy/*rest', async (req, res) => {
   if (!['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) throw new HttpError(405, 'Method not allowed');
   const rest = [].concat(req.params.rest || []).join('/');
   const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
-  const reqPath = `/${rest}${qs}`;
-  if (!/^\/(api\/|health)/.test(reqPath) || !/^\/[A-Za-z0-9_.~\-/%?=&+,:@!$'()*[\]{}"]*$/.test(reqPath)) throw new HttpError(400, 'Invalid path');
   const app = JSON.parse((await readRemote(req.params.id, `${dir(name)}/.serverboy-app.json`)) || '{}');
+  // Swagger lists the public folder paths (/<folder>/<group>/<api>); the engine answers /api/<api>.
+  const reqPath = mounts.toInternal(app, migrate(await loadConfig(req.params.id, name)), `/${rest}${qs}`);
+  if (!/^\/(api\/|health)/.test(reqPath) || !/^\/[A-Za-z0-9_.~\-/%?=&+,:@!$'()*[\]{}"]*$/.test(reqPath)) throw new HttpError(400, 'Invalid path');
   if (!app.port) throw new HttpError(404, 'API not found');
   const key = String(req.get('x-api-key') || '').trim();
   if (key && !/^[A-Za-z0-9_-]{8,200}$/.test(key)) throw new HttpError(400, 'Invalid API key format');
@@ -841,12 +887,28 @@ ${pm2.whenRunning(`pm2 jlist 2>/dev/null | tail -1`, 'echo "[]"')}`,
     } else add('request', 'skip', 'No read operation is switched on to test');
   }
 
-  // 10. Public address
-  if (app.domain) {
+  // 10. Public address: the website folder, or its own address
+  if (app.site) {
+    const sites = (await nginx.listSites(serverId)).sites;
+    const s = sites.find((x) => x.name === app.site);
+    const first = slug && cfg.apis?.[slug] ? slug : Object.keys(cfg.apis || {})[0];
+    const p = first ? mounts.apiPath(app.folder, first, cfg.apis[first]) : `/${app.folder}/__serverboy_check`;
+    if (!s) add('address', 'bad', `The website ${app.site} does not exist any more`, 'Put this API server in another website (Settings → Address).', 'mount');
+    else if (!s.enabled) add('address', 'bad', `The website ${app.site} is switched off`, 'Switch it on under Websites; its API folder comes back with it.');
+    else if (s.testMode) add('address', 'warn', `${app.site} is in test mode`, `The internet gets "Coming soon" for the whole website, its API folder included, until the owner makes it live (Websites → Make live).`);
+    else {
+      const scheme = s.ssl ? 'https' : 'http';
+      const r = await ssh.exec(serverId, `curl -sk -m 8 -o /tmp/.sb-probe -w '%{http_code} %{content_type}' --resolve ${q(`${app.site}:${s.ssl ? 443 : 80}:127.0.0.1`)} ${q(`${scheme}://${app.site}${p}?limit=1`)}; echo " $(head -c 200 /tmp/.sb-probe | tr -d '\n')"; rm -f /tmp/.sb-probe`);
+      const code = Number(r.stdout.split(' ')[0]) || 0;
+      const json = /application\/json/.test(r.stdout);
+      if (json && (first ? code < 500 && !/"Not found"\}/.test(r.stdout) || code === 401 : code === 404)) add('address', 'ok', 'Its website address works', `${scheme}://${app.site}/${app.folder}/…`);
+      else add('address', 'bad', `${scheme}://${app.site}${p} does not reach it (${code || 'no answer'})`, 'The routes of the website folder are missing or out of date. "Update the website routes" writes them again.', 'mount');
+    }
+  } else if (app.domain) {
     const chk = await nginx.checkApiAddress(serverId, app.domain, app.port).catch((err) => ({ ok: false, problem: err.message, fixable: false }));
     if (chk.ok) add('address', 'ok', `Public address works`, app.domain);
     else add('address', 'bad', `The public address ${app.domain} does not reach it`, chk.problem || '', chk.fixable ? 'fix-address' : null);
-  } else add('address', 'warn', 'Not published yet', 'Only this server can reach the API. Websites and apps elsewhere need a public address.', 'publish');
+  } else add('address', 'warn', 'Not published yet', 'Only this server can reach the API. Put it in a website\'s API folder (or give it its own address) so websites and apps can use it.', 'mount');
   done();
 });
 
@@ -862,7 +924,9 @@ async function identityOf(serverId, name) {
   };
   const [cfg, app, pm2File] = await Promise.all([read('api.config.json'), read('.serverboy-app.json'), read('.serverboy-pm2.json')]);
   const p = pm2File?.apps?.[0];
-  const copyOf = [cfg?.name, app?.name, p?.name].find((n) => n && n !== name) || (p?.cwd && p.cwd !== dir(name) ? p.cwd.split('/').pop() : null);
+  // A backup restored as a copy is named <original>-restored-<date>-<time>.
+  const restored = /-restored-\d{8}-\d{6}$/.test(name) && !app?.independent ? name.replace(/-restored-\d{8}-\d{6}$/, '') : null;
+  const copyOf = [cfg?.name, app?.name, p?.name].find((n) => n && n !== name) || (p?.cwd && p.cwd !== dir(name) ? p.cwd.split('/').pop() : null) || restored;
   const owner = await ssh.exec(serverId, `[ -w ${q(dir(name))} ] && [ -w ${q(`${dir(name)}/.serverboy-app.json`)} ] && echo WRITABLE`);
   return { cfg, app, pm2File, copyOf: copyOf || null, writable: owner.stdout.includes('WRITABLE') };
 }
@@ -883,10 +947,15 @@ router.post('/mongo/apis/:name/move-port', async (req, res) => {
     id = await identityOf(serverId, name);
   }
   if (id.copyOf) changes.push(`It was a copy of ${id.copyOf}: it now has its own name`);
+  if (id.copyOf && id.app?.site) {
+    changes.push(`It no longer claims the API folder /${id.app.folder} of ${id.app.site} (that belongs to ${id.copyOf}). Put it in a website under Settings → Address`);
+    delete id.app.site;
+    delete id.app.folder;
+  }
   const app = id.app || {};
   const old = app.port;
   const port = await freePort(serverId);
-  Object.assign(app, { name, port });
+  Object.assign(app, { name, port, independent: true });
   // Never keep an address another app also uses: that address belongs to the other app.
   if (app.domain) {
     const r = await ssh.exec(serverId, `grep -l ${q(`"domain": ${JSON.stringify(app.domain)}`)} /var/www/*/.serverboy-app.json 2>/dev/null`);
@@ -935,6 +1004,7 @@ out({ ok: 1 });`,
     started = r.stdout.includes('started');
     if (started) changes.push('Started');
   }
+  if (app.site) changes.push(`Routes of ${app.site} updated (${(await mounts.sync(serverId, app.site)).routes} APIs)`);
   audit(req, `Data API ${name}: made independent on port ${port}${id.copyOf ? ` (was a copy of ${id.copyOf})` : ''}`);
   res.json({ ok: true, port, changes, started });
 });
@@ -956,6 +1026,94 @@ router.get('/mongo/apis/:name/logs', async (req, res) => {
   await loadConfig(req.params.id, name);
   const r = await ssh.exec(req.params.id, `tail -n 120 ~/.pm2/logs/${q(name)}-out.log ~/.pm2/logs/${q(name)}-error.log 2>&1`);
   res.json({ log: r.stdout });
+});
+
+// ---------- API folders inside websites ----------
+
+// Websites with their API folder, for "where should the API live?".
+router.get('/mongo/api-folders', async (req, res) => {
+  const list = await mounts.websites(req.params.id);
+  res.json(list.filter((w) => scope.canSeeSite(req.user, req.params.id, w.name)));
+});
+
+// Rename the API folder of a website (moves every API in it to the new address).
+router.post('/mongo/api-folders', async (req, res) => {
+  const serverId = req.params.id;
+  const site = nginx.validDomain(req.body?.site);
+  const folder = mounts.folderName(req.body?.folder);
+  scope.requireSite(req, site, 'all');
+  if (!scope.isAll(req.user, 'databases')) throw new HttpError(403, 'Renaming a website\'s API folder moves the APIs of every database in it, so it needs access to all databases.');
+  const list = (await mounts.servers(serverId)).filter((s) => s.app.site === site && !mounts.isCopy(s));
+  if (!list.length) throw new HttpError(404, `${site} has no API folder yet.`);
+  const old = list[0].app.folder;
+  for (const s of list) await ssh.writeFile(serverId, `${dir(s.name)}/.serverboy-app.json`, JSON.stringify({ ...s.app, folder }, null, 2), { sudo: false });
+  try {
+    await mounts.sync(serverId, site);
+  } catch (err) {
+    for (const s of list) await ssh.writeFile(serverId, `${dir(s.name)}/.serverboy-app.json`, JSON.stringify(s.app, null, 2), { sudo: false });
+    await mounts.sync(serverId, site).catch(() => {});
+    throw err;
+  }
+  audit(req, `API folder of ${site}: /${old} → /${folder}`);
+  res.json({ ok: true, site, folder, old });
+});
+
+// Put an API server in a website's API folder (or, with no body, write its routes again).
+router.post('/mongo/apis/:name/mount', async (req, res) => {
+  const serverId = req.params.id;
+  const name = apiName(req.params.name);
+  const cfg = migrate(await loadConfig(serverId, name));
+  const appFile = `${dir(name)}/.serverboy-app.json`;
+  const app = JSON.parse((await readRemote(serverId, appFile)) || '{}');
+  if (!app.port) throw new HttpError(409, 'Finish the setup of this API server first.');
+  if (mounts.isCopy({ name, cfg, app })) throw new HttpError(409, `${name} is a copy of another API server. Open Diagnose and click "Make it independent" first.`);
+  const site = req.body?.site ? nginx.validDomain(req.body.site) : app.site;
+  if (!site) throw new HttpError(400, 'Choose a website');
+  scope.requireSite(req, site, 'edit');
+  const w = (await mounts.websites(serverId)).find((x) => x.name === site);
+  if (!w) throw new HttpError(404, `There is no website ${site} on this server (or it is Serverboy itself).`);
+  let folder = req.body?.folder ? mounts.folderName(req.body.folder) : app.folder;
+  const changes = [];
+  if (w.folder && w.folder !== folder && !w.servers.every((x) => x.name === name)) {
+    changes.push(`${site} already has the API folder /${w.folder}, so this API server uses it too`);
+    folder = w.folder;
+  }
+  if (!folder) throw new HttpError(400, 'Choose a folder name');
+  const before = { site: app.site, folder: app.folder };
+  const next = { ...app, site, folder };
+  await mounts.check(serverId, site, { name, cfg, app: next });
+  await ssh.writeFile(serverId, appFile, JSON.stringify(next, null, 2), { sudo: false });
+  try {
+    const r = await mounts.sync(serverId, site);
+    changes.push(`Its ${r.routes ? `APIs answer at ${r.ssl ? 'https' : 'http'}://${site}/${folder}/…` : `folder is ${site}/${folder}`}`);
+    if (r.testMode) changes.push(`${site} is in test mode: the internet gets "Coming soon" until the owner makes it live (Websites)`);
+    // Moved from another website: take the routes out of the old one.
+    if (before.site && before.site !== site) {
+      await mounts.sync(serverId, before.site).catch(() => {});
+      changes.push(`Removed from ${before.site}`);
+    }
+  } catch (err) {
+    await ssh.writeFile(serverId, appFile, JSON.stringify(app, null, 2), { sudo: false });
+    throw err;
+  }
+  audit(req, `Data API ${name}: in ${site}/${folder}`);
+  res.json({ ok: true, site, folder, changes, paths: mounts.pathsOf(next, cfg) });
+});
+
+// Take an API server out of its website folder.
+router.post('/mongo/apis/:name/unmount', async (req, res) => {
+  const serverId = req.params.id;
+  const name = apiName(req.params.name);
+  await loadConfig(serverId, name);
+  const appFile = `${dir(name)}/.serverboy-app.json`;
+  const app = JSON.parse((await readRemote(serverId, appFile)) || '{}');
+  if (!app.site) return res.json({ ok: true });
+  scope.requireSite(req, app.site, 'edit');
+  const { site, folder, ...rest } = app;
+  await ssh.writeFile(serverId, appFile, JSON.stringify(rest, null, 2), { sudo: false });
+  await mounts.sync(serverId, site).catch(() => {});
+  audit(req, `Data API ${name}: removed from ${site}/${folder}`);
+  res.json({ ok: true });
 });
 
 // Does the public address really reach the API? (Nginx is asked on the server itself.)
@@ -1054,6 +1212,7 @@ router.delete('/mongo/apis/:name', async (req, res) => {
   const own = app.domain ? await require('../lib/self-protect').isOwnSite(serverId, app.domain) : false;
   if (app.domain && !shared && !own) cmd += ` && rm -f ${q(`/etc/nginx/sites-enabled/${app.domain}`)} ${q(`/etc/nginx/sites-available/${app.domain}`)} && (nginx -t && systemctl reload nginx || true)`;
   await ssh.exec(serverId, cmd, { sudo: true, check: true });
+  if (app.site) await mounts.sync(serverId, app.site).catch(() => {});
   audit(req, `Deleted data API ${name} (the data in ${cfg.database} was not touched)`);
   res.json({ ok: true });
 });

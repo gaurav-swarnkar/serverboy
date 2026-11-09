@@ -712,3 +712,9 @@ tr.deploy-live td { background: color-mix(in srgb, var(--accent-soft) 50%, trans
 .al-srv { padding: 8px 0; border-bottom: 1px solid var(--border); }
 .al-srv:last-child { border-bottom: 0; }
 .al-p { margin-top: 4px; }
+.api-folder { font-size: .7em; padding: 2px 8px; border-radius: 8px; background: var(--accent-soft); vertical-align: middle; }
+.new-url { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--panel-2); }
+.new-url .mono { word-break: break-all; margin-top: 2px; }
+.where-opts { display: grid; gap: 4px; margin-top: 4px; }
+.api-data-row { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--border); }
+.api-data-row:first-of-type { border-top: 0; }

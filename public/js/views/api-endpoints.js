@@ -1,7 +1,7 @@
 // The endpoints of one API as a compact table, each with a Test button that sends a real
 // request and shows the answer underneath. Used on the API page and in Databases → APIs.
 import { api, esc, toast, confirmDialog } from '../ui.js';
-import { OPS, baseUrl, details, fetchFor, curlFor } from './api-docs.js';
+import { OPS, baseUrl, pathOf, details, fetchFor, curlFor } from './api-docs.js';
 
 // The API server itself looks broken (no answer, a crash, or it does not know the API at all).
 const broken = (r) => !r.status || r.status >= 500 || (r.status === 404 && /There is no API|^Not found\. APIs:/.test(String(r.body?.error || '')));
@@ -28,14 +28,14 @@ function sampleBody(fields) {
 export function endpointTable(el, { serverId, svc, info, slug, fields, sampleId = '', canKey = true }) {
   const a = info.apis[slug];
   const on = OPS.filter((o) => (a.ops?.[o.op] || 'off') !== 'off');
-  const entry = (o) => ({ ...o, slug, api: a, mode: a.ops[o.op], path: `/api/${slug}${o.suffix}` });
+  const entry = (o) => ({ ...o, slug, api: a, mode: a.ops[o.op], path: `${pathOf(info, slug)}${o.suffix}` });
   const required = (a.params || []).filter((p) => p.required).map((p) => `${p.name}=`);
   el.innerHTML = on.length
     ? `<div class="table-wrap"><table class="ep-table"><tbody>${on
         .map(
           (o) => `<tr class="ep-row" data-op="${o.op}">
             <td style="width:76px"><span class="badge method-${o.method.toLowerCase()}">${o.method}</span></td>
-            <td class="mono small">/api/${esc(slug)}${o.suffix.replace(':id', '{id}')}</td>
+            <td class="mono small">${esc(pathOf(info, slug))}${o.suffix.replace(':id', '{id}')}</td>
             <td class="small muted ep-desc">${o.verb}</td>
             <td class="small" style="white-space:nowrap">${WHO_SHORT[a.ops[o.op]]}</td>
             <td class="actions"><button class="btn-sm btn-primary" data-ep="test" data-op="${o.op}">Test</button><button class="btn-sm" data-ep="code" data-op="${o.op}">Code</button></td>
@@ -124,5 +124,5 @@ export function endpointTable(el, { serverId, svc, info, slug, fields, sampleId 
     }
     if (b.dataset.ep === 'send') send(o, panel(o.op));
   };
-  return { url: `${baseUrl(info)}/api/${slug}` };
+  return { url: `${baseUrl(info)}${pathOf(info, slug)}` };
 }

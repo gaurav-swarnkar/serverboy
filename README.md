@@ -134,6 +134,18 @@ Serverboy checks each server every 5 minutes (configurable): websites and Nginx,
 
 ## APIs (MongoDB data over HTTPS)
 
+**Where APIs live.** Each website has one **API folder**, named by you, for example `https://shop.com/data-k3x9/` (avoid `/api`: it is the first thing people try). APIs from any of your databases can live in it, and an API's **group** becomes a sub-folder:
+
+```
+https://shop.com/data-k3x9/auth/login       database users → collection users
+https://shop.com/data-k3x9/auth/register
+https://shop.com/data-k3x9/blog/posts       database blog  → collection posts
+```
+
+Choose the website and folder when you make the first API of a database (**New API → Where should it live?**), or later under **API server → Settings → Address → Put in a website**. The APIs page shows websites → folder → groups, and **Rename folder** moves every API of a website at once. Serverboy writes the Nginx routes (`/etc/nginx/serverboy/api/<website>.conf`, included by the website) and keeps them up to date when APIs are added, renamed or deleted. The website's own pages are not touched; the folder answers JSON 404 for anything that is not an API. Two APIs can never get the same address. An API server can also stay private, or keep its own address (a sub-domain with `/api/<name>`), as before.
+
+A folder copied from an API server (for example a backup restored as `<name>-restored-<date>`) is marked as a copy on the APIs page: it gets no routes and no new APIs, and can be deleted or made separate in one click.
+
 Hosting → **APIs** lists every database, its collections and the APIs of each collection (Try · Docs · settings, and **+ New API for <collection>**). In **Databases → MongoDB**, each collection shows how many APIs use it and has an **APIs** tab with the same links. An API is a named, safe door to one MongoDB collection, at `https://<api-server>/api/<name>`. Make as many as you like, also several for the same collection with different rules, e.g. **Products** (anyone can see) and **Products admin** (apps with a key can add, change and delete).
 
 - **+ New API** asks three things: which data (database and collection, or a new one), what it is for (*Show it on a website*, *Website + my admin app*, *Private, for my own app*, *A form*, or *I'll choose myself*) and its name and address. The first API of a database also sets up that database's **API server** (a small Node.js service in `/var/www/<name>`, run by PM2, with its own MongoDB user limited to that database), optionally on a domain with HTTPS.

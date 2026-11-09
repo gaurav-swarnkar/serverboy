@@ -9,7 +9,7 @@
 import { api, esc, toast, run, modal, confirmDialog, formDialog, showJob, onAction, loadingHtml, errorHtml, hasAll, can } from '../ui.js';
 import { mountSwagger } from './swagger.js';
 import { endpointTable } from './api-endpoints.js';
-import { OPS, WHO, summary, baseUrl, catalog, inferFields, docsText, downloadText } from './api-docs.js';
+import { OPS, WHO, summary, baseUrl, pathOf, catalog, inferFields, docsText, downloadText } from './api-docs.js';
 
 const SYSTEM_DBS = new Set(['admin', 'local', 'config', 'serverboy']);
 
@@ -40,6 +40,11 @@ const KEY_RIGHTS = [
 ];
 
 const slugify = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+// An API folder name that is not the first thing people try (/api).
+const randomFolder = () => `data-${Math.random().toString(36).slice(2, 6)}`;
+const originOf = (w) => `${w?.ssl ? 'https' : 'http'}://${w?.name}`;
+// The public path of an API: in a website folder /<folder>/<group>/<api>, else /api/<api>.
+const pathIn = (folder, slug, group) => (folder ? `/${folder}/${slugify(group || '') ? `${slugify(group)}/` : ''}${slug}` : `/api/${slug}`);
 const suggestedDomain = (name) => (location.hostname.endsWith('.sslip.io') ? `${name}.${location.hostname}` : '');
 const escapeRegex = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -69,6 +74,8 @@ function makeCtx(server) {
     newUrl: (db, col) => `#/s/${server.id}/apis/new/${encodeURIComponent(db)}/${encodeURIComponent(col || '-')}`,
     svcUrl: (svc, tab = 'apis') => `#/s/${server.id}/apis/s/${encodeURIComponent(svc)}/${tab}`,
     services: () => api(base),
+    // Websites with their API folder (https://<site>/<folder>/…).
+    websites: () => api(`/servers/${server.id}/mongo/api-folders`).catch(() => []),
     info: (svc) => api(`${base}/${svc}`),
     databases: async () => (await api(`/servers/${server.id}/mongo/databases`).catch(() => [])).filter((d) => !SYSTEM_DBS.has(d.name)),
     collections: (db) => api(`/servers/${server.id}/mongo/databases/${encodeURIComponent(db)}/collections`).catch(() => []),
@@ -122,74 +129,181 @@ function showNewKey(k, writes) {
 
 // ======================= all APIs =======================
 
-// Databases → collections → the APIs that use each collection.
+// Put an API server in a website's API folder (or move it to another website).
+async function mountDialog(ctx, svcName, onDone) {
+  const websites = (await ctx.websites()).filter((w) => w.enabled);
+  if (!websites.length) return toast('Create a website first (Websites), then put the API in its API folder.', 'error', 8000);
+  const box = document.createElement('div');
+  box.innerHTML = `<p class="small muted" style="margin-top:0">Its APIs will answer at <span class="mono">https://&lt;website&gt;/&lt;folder&gt;/&lt;group&gt;/&lt;api&gt;</span>. The website's own pages stay as they are.</p>
+    <label class="field"><span>Website</span><select name="site">${websites.map((w) => `<option value="${esc(w.name)}">${esc(w.name)}${w.folder ? ` (/${esc(w.folder)})` : ''}${w.testMode ? ' · test mode' : ''}</option>`).join('')}</select></label>
+    <label class="field"><span>API folder</span><div class="row" style="flex-wrap:nowrap;gap:4px"><span class="mono muted">/</span><input name="folder" class="mono"></div><small data-note></small></label>`;
+  const sel = box.querySelector('[name=site]');
+  const folder = box.querySelector('[name=folder]');
+  const mine = randomFolder();
+  const changed = () => {
+    const w = websites.find((x) => x.name === sel.value);
+    folder.value = w?.folder || mine;
+    folder.readOnly = Boolean(w?.folder);
+    box.querySelector('[data-note]').innerHTML = w?.folder ? `${esc(w.name)} already has the API folder <b class="mono">/${esc(w.folder)}</b>; every API of it lives there.` : 'Pick a name that is hard to guess: <span class="mono">/api</span> is the first thing people try.';
+  };
+  sel.addEventListener('change', changed);
+  changed();
+  modal({
+    title: `Put ${svcName} in a website`,
+    body: box,
+    actions: [
+      { label: 'Cancel' },
+      {
+        label: 'Put it there',
+        className: 'btn-primary',
+        onClick: async () => {
+          const r = await api(`${ctx.base}/${encodeURIComponent(svcName)}/mount`, { method: 'POST', body: { site: sel.value, folder: folder.value.trim() } });
+          toast(r.changes.join('. '), 'ok', 9000);
+          onDone?.();
+        },
+      },
+    ],
+  });
+}
+
+async function renameFolderDialog(ctx, site, folder, onDone) {
+  const r = await formDialog({
+    title: `Rename the API folder of ${site}`,
+    intro: `Every API in <b>${esc(site)}/${esc(folder)}</b> moves to the new folder at once. Websites and apps that call the old address stop working until you update them.`,
+    fields: [{ name: 'folder', label: 'New folder name', value: folder }],
+    submitLabel: 'Rename',
+    submit: (x) => api(`/servers/${ctx.server.id}/mongo/api-folders`, { method: 'POST', body: { site, folder: x.folder.trim() } }),
+  });
+  if (r?.ok) {
+    toast(`APIs of ${site} now live in /${r.folder}`, 'ok');
+    onDone?.();
+  }
+}
+
+// Websites → their API folder → groups → APIs. Then API servers not in a website yet, and the
+// collections that have no API.
 async function renderHome(el, ctx) {
   el.innerHTML = `
     <div class="page-head">
-      <div><h1>APIs</h1><div class="sub">Let your websites and apps read and change your data over the internet, safely. Every collection can have several APIs, each with its own rules.</div></div>
+      <div><h1>APIs</h1><div class="sub">Let your websites and apps read and change your data, safely. Each website has an API folder; group APIs inside it (auth, blog, shop…).</div></div>
       <div class="row"><button data-action="swagger">📖 API docs (Swagger)</button><button data-action="docs">⬇ Docs for AI (.txt)</button><a class="btn btn-primary" href="${ctx.home}/new">+ New API</a></div>
     </div>
     <div id="apis-body">${loadingHtml()}</div>`;
   const body = el.querySelector('#apis-body');
   let services = [];
   let dbs = [];
+  let websites = [];
   try {
-    [services, dbs] = await Promise.all([ctx.services(), ctx.databases()]);
+    [services, dbs, websites] = await Promise.all([ctx.services(), ctx.databases(), ctx.websites()]);
     services = services.filter((s) => !s.broken);
   } catch (err) {
     body.innerHTML = errorHtml(err);
     return;
   }
+  const copies = services.filter((s) => s.copyOf);
+  const live = services.filter((s) => !s.copyOf);
   const colsByDb = Object.fromEntries(await Promise.all(dbs.map(async (d) => [d.name, (await ctx.collections(d.name)).filter((c) => !c.name.startsWith('system.'))])));
   const canEditDb = (name) => hasAll('databases') || dbs.find((d) => d.name === name)?.access === 'edit';
-  const apiRow = (a, svc) => `<div class="api-row">
-      <div class="grow"><a href="${ctx.apiUrl(svc.name, a.slug)}"><b>${esc(a.title)}</b></a> <span class="mono small muted">/api/${esc(a.slug)}</span>${a.group ? ` <span class="badge">${esc(a.group)}</span>` : ''}
-        <div class="small muted">${esc(summary(a))}</div></div>
-      <div class="row" style="gap:6px"><a class="btn btn-sm btn-primary" href="${ctx.apiUrl(svc.name, a.slug)}">Test</a><a class="btn btn-sm" href="${ctx.docsUrl(svc.name, a.slug)}">📖 Swagger</a><a class="btn btn-sm" href="${ctx.apiUrl(svc.name, a.slug, 'setup')}">⚙</a></div>
+  const state = (s) => (s.status === 'online' ? '' : ` <span class="badge bad" title="API server ${esc(s.name)}">${esc(s.status)}</span>`);
+  const apiRow = (a, svc, showState = true) => `<div class="api-row">
+      <div class="grow"><a href="${ctx.apiUrl(svc.name, a.slug)}"><b>${esc(a.title)}</b></a> <span class="mono small">${esc(svc.paths?.[a.slug] || `/api/${a.slug}`)}</span>${showState ? state(svc) : ''}
+        <div class="small muted">${esc(summary(a))} · data: ${esc(svc.database)} → ${esc(a.collection)}</div></div>
+      <div class="row" style="gap:6px"><a class="btn btn-sm btn-primary" href="${ctx.apiUrl(svc.name, a.slug)}">Test</a><a class="btn btn-sm" href="${ctx.docsUrl(svc.name, a.slug)}">📖 Swagger</a><a class="btn btn-sm" href="${ctx.apiUrl(svc.name, a.slug, 'setup')}" title="Settings">⚙</a></div>
     </div>`;
+
+  // Websites with an API folder.
+  const bySite = new Map();
+  for (const s of live.filter((x) => x.site)) {
+    if (!bySite.has(s.site)) bySite.set(s.site, []);
+    bySite.get(s.site).push(s);
+  }
+  const siteCard = ([site, svcs]) => {
+    const w = websites.find((x) => x.name === site);
+    const folder = svcs[0].folder;
+    const groups = new Map();
+    for (const s of svcs) {
+      for (const a of s.apis) {
+        const g = slugify(a.group || '');
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(apiRow(a, s));
+      }
+    }
+    const keys = [...groups.keys()].sort((x, y) => (x === '' ? -1 : y === '' ? 1 : x.localeCompare(y)));
+    return `<div class="card flush api-db">
+      <div class="card-head"><div><h2 style="margin:0">🌐 ${esc(site)} <span class="mono api-folder">/${esc(folder)}/</span></h2>
+        <div class="small muted">${w ? `${w.ssl ? 'https' : 'http'}://${esc(site)}/${esc(folder)}/…` : '<span style="color:var(--bad)">This website does not exist any more.</span>'}${w?.testMode ? ' · <span class="badge warn">test mode: the internet sees "Coming soon"</span>' : ''} · data from ${svcs.map((s) => `<a href="${ctx.svcUrl(s.name, 'settings')}">${esc(s.database)}</a>${state(s)}`).join(', ')}</div></div>
+        <div class="row">${hasAll('databases') ? `<button class="btn-sm" data-action="renameFolder" data-site="${esc(site)}" data-folder="${esc(folder)}">Rename folder</button>` : ''}<a class="btn btn-sm btn-primary" href="${ctx.home}/new">+ New API</a></div></div>
+      ${keys
+        .map((g) => `<div class="api-col-block"><div class="row api-col-head"><b class="mono grow">📁 /${esc(folder)}/${g ? `${esc(g)}/` : ''}</b><span class="small muted">${g ? `group ${esc(g)}` : 'no group'}</span></div>${groups.get(g).join('')}</div>`)
+        .join('') || '<div class="api-col-block small muted">No APIs in this folder yet.</div>'}
+    </div>`;
+  };
+
+  // API servers that are not in a website (old style own address, or private).
+  const loose = live.filter((s) => !s.site && (s.apis.length || s.status !== 'online'));
+  const looseCard = (s) => `<div class="card flush api-db">
+      <div class="card-head"><div><h2 style="margin:0">⛁ ${esc(s.database)} <span class="small muted">API server <a href="${ctx.svcUrl(s.name, 'settings')}">${esc(s.name)}</a></span>${state(s)}</h2>
+        <div class="small muted">${s.domain ? `Own address <span class="mono">${esc(s.domain)}</span>` : 'Private: only this server can call it.'} Put it in a website's API folder to give it an address there.</div></div>
+        <div class="row">${canEditDb(s.database) && !s.needsUpgrade ? `<button class="btn-sm btn-primary" data-action="mount" data-svc="${esc(s.name)}">Put in a website</button>` : ''}</div></div>
+      ${s.apis.map((a) => apiRow(a, s, false)).join('') || '<div class="api-col-block small muted">No APIs yet.</div>'}
+    </div>`;
+
+  // Collections per database, with how many APIs use each.
+  const dataCard = (d) => {
+    const svcs = live.filter((s) => s.database === d.name);
+    const cols = colsByDb[d.name] || [];
+    const used = (c) => svcs.reduce((n, s) => n + s.apis.filter((a) => a.collection === c).length, 0);
+    return `<div class="api-data-row"><b>⛁ ${esc(d.name)}</b><div class="row" style="gap:6px;flex-wrap:wrap">${cols
+      .map((c) => {
+        const n = used(c.name);
+        return canEditDb(d.name)
+          ? `<a class="btn btn-sm" href="${ctx.newUrl(d.name, c.name)}" title="Make an API for ${esc(c.name)}">▤ ${esc(c.name)} <span class="muted">${n ? `${n} API${n === 1 ? '' : 's'} · ` : ''}+ API</span></a>`
+          : `<span class="badge">${esc(c.name)}${n ? ` · ${n}` : ''}</span>`;
+      })
+      .join('') || '<span class="small muted">No collections yet.</span>'}</div></div>`;
+  };
+
   body.innerHTML = `
-    ${services.filter((s) => s.needsUpgrade).map(upgradeNotice).join('')}
+    ${live.filter((s) => s.needsUpgrade).map(upgradeNotice).join('')}
+    ${copies
+      .map(
+        (c) => `<div class="notice warn" style="margin-bottom:12px"><b>${esc(c.name)}</b> is a copy of the API server <b>${esc(c.copyOf)}</b> (for example a backup restored as a copy). It is not used, and new APIs never go into it.
+          <div class="row" style="margin-top:8px">${hasAll('databases') ? `<button class="btn-sm btn-danger" data-action="deleteCopy" data-svc="${esc(c.name)}">Delete this copy</button><button class="btn-sm" data-action="independent" data-svc="${esc(c.name)}">Make it a separate API server</button>` : ''}</div></div>`,
+      )
+      .join('')}
+    ${[...bySite.entries()].map(siteCard).join('')}
+    ${loose.length ? `<h3 style="margin:18px 0 8px">Not in a website yet</h3>${loose.map(looseCard).join('')}` : ''}
+    ${
+      !live.length && !copies.length
+        ? `<div class="card api-empty"><h2>No APIs yet</h2><p>An API lets a website or app use a collection of your MongoDB data. It lives in the website's API folder, for example <span class="mono">https://shop.com/data-k3x9/blog/posts</span>.</p><a class="btn btn-primary" href="${ctx.home}/new">+ New API</a></div>`
+        : ''
+    }
     ${
       dbs.length
-        ? dbs
-            .map((d) => {
-              const svcs = services.filter((s) => s.database === d.name);
-              const cols = colsByDb[d.name] || [];
-              const colNames = [...new Set([...cols.map((c) => c.name), ...svcs.flatMap((s) => s.apis.map((a) => a.collection))])];
-              const withApis = colNames.filter((c) => svcs.some((s) => s.apis.some((a) => a.collection === c)));
-              const without = colNames.filter((c) => !withApis.includes(c));
-              return `<div class="card flush api-db">
-                <div class="card-head"><div><h2 style="margin:0">⛁ ${esc(d.name)}</h2>
-                  <div class="small muted">${svcs.length ? svcs.map((s) => `API server <a href="${ctx.svcUrl(s.name, 'settings')}">${esc(s.name)}</a> <span class="badge ${s.status === 'online' ? 'ok' : 'bad'}">${esc(s.status)}</span> ${s.domain ? `<span class="mono">${esc(s.domain)}</span>` : 'not published yet'}`).join(' · ') : 'No APIs yet'}</div></div>
-                  <div class="row">${svcs.filter((s) => s.apis.length).map((s, _i, all) => `<a class="btn btn-sm" href="${ctx.docsUrl(s.name)}">📖 Docs${all.length > 1 ? ` (${esc(s.name)})` : ''}</a>`).join('')}<a class="btn btn-sm" href="#/s/${ctx.server.id}/databases/mongo">Open in Databases</a></div></div>
-                ${withApis
-                  .map((c) => {
-                    const count = cols.find((x) => x.name === c)?.count;
-                    return `<div class="api-col-block">
-                      <div class="row api-col-head"><b class="mono grow">▤ ${esc(c)}</b>${count != null ? `<span class="small muted">${count} items</span>` : ''}${canEditDb(d.name) ? `<a class="btn btn-sm" href="${ctx.newUrl(d.name, c)}">+ New API for ${esc(c)}</a>` : ''}</div>
-                      ${svcs.flatMap((s) => s.apis.filter((a) => a.collection === c).map((a) => apiRow(a, s))).join('')}
-                    </div>`;
-                  })
-                  .join('')}
-                ${
-                  without.length
-                    ? `<div class="api-col-block muted-block"><div class="small muted" style="margin-bottom:6px">${withApis.length ? 'Collections without an API' : 'Collections (no API yet)'}</div><div class="row" style="gap:6px">${without
-                        .map((c) => (canEditDb(d.name) ? `<a class="btn btn-sm" href="${ctx.newUrl(d.name, c)}" title="Make an API for ${esc(c)}">▤ ${esc(c)} <span class="muted">+ API</span></a>` : `<span class="badge">${esc(c)}</span>`))
-                        .join('')}</div></div>`
-                    : ''
-                }
-              </div>`;
-            })
-            .join('')
+        ? `<div class="card" style="margin-top:14px"><h3 style="margin-top:0">Your data</h3><p class="small muted" style="margin-top:0">Click a collection to make an API for it.</p>${dbs.map(dataCard).join('')}</div>`
         : `<div class="card api-empty"><h2>No MongoDB database yet</h2><p>Create a database in <a href="#/s/${ctx.server.id}/databases">Databases</a>, then come back to make an API for it.</p></div>`
     }`;
+  const reload = () => renderHome(el, ctx);
   onAction(el, {
-    upgrade: ({ svc }) => upgrade(ctx, svc, () => renderHome(el, ctx)),
-    docs: () => docsDialog(ctx, services),
+    upgrade: ({ svc }) => upgrade(ctx, svc, reload),
+    docs: () => docsDialog(ctx, live),
     swagger: () => {
-      const s = services.find((x) => x.apis.length);
-      if (!s) return toast('Make an API first.', 'error');
-      location.hash = ctx.docsUrl(s.name);
+      const sv = live.find((x) => x.apis.length);
+      if (!sv) return toast('Make an API first.', 'error');
+      location.hash = ctx.docsUrl(sv.name);
+    },
+    mount: ({ svc }) => mountDialog(ctx, svc, reload),
+    renameFolder: ({ site, folder }) => renameFolderDialog(ctx, site, folder, reload),
+    deleteCopy: async ({ svc }) => {
+      if (!(await confirmDialog(`Delete the copy ${svc}? Its folder /var/www/${svc} is removed. The API server it was copied from and all data in the database stay as they are.`, { danger: true, confirmLabel: 'Delete copy' }))) return;
+      if (await run(null, () => api(`${ctx.base}/${encodeURIComponent(svc)}`, { method: 'DELETE' }), 'Copy deleted')) reload();
+    },
+    independent: async ({ svc }) => {
+      const r = await run(null, () => api(`${ctx.base}/${encodeURIComponent(svc)}/move-port`, { method: 'POST' }));
+      if (r) {
+        toast(r.changes.join('. '), 'ok', 9000);
+        reload();
+      }
     },
   });
 }
@@ -200,7 +314,7 @@ async function renderDocs(el, ctx, svcName, slug) {
   el.innerHTML = loadingHtml();
   let services;
   try {
-    services = (await ctx.services()).filter((s) => !s.broken && s.apis.length);
+    services = (await ctx.services()).filter((s) => !s.broken && !s.copyOf && s.apis.length);
   } catch (err) {
     el.innerHTML = errorHtml(err);
     return;
@@ -298,13 +412,15 @@ async function renderNew(el, ctx, pre) {
   const body = el.querySelector('#new-body');
   let services;
   let dbs;
+  let websites = [];
   try {
-    [services, dbs] = await Promise.all([ctx.services(), ctx.databases()]);
+    [services, dbs, websites] = await Promise.all([ctx.services(), ctx.databases(), ctx.websites()]);
   } catch (err) {
     body.innerHTML = errorHtml(err);
     return;
   }
-  services = services.filter((s) => !s.broken);
+  // Restored backup copies are not real API servers: never add APIs to them.
+  services = services.filter((s) => !s.broken && !s.copyOf);
   dbs = dbs.filter((d) => hasAll('databases') || d.access === 'edit');
   if (!dbs.length) {
     body.innerHTML = `<div class="card"><p>There is no MongoDB database you can change yet. Create one in <a href="#/s/${ctx.server.id}/databases">Databases</a> first.</p></div>`;
@@ -337,10 +453,12 @@ async function renderNew(el, ctx, pre) {
         <h3>Name and address</h3>
         <div class="form-grid">
           <label class="field"><span>Name</span><input name="title" placeholder="Products"></label>
-          <label class="field"><span>Address</span><div class="row" style="flex-wrap:nowrap;gap:4px"><span class="mono muted">/api/</span><input name="slug" class="mono" placeholder="products"></div><small id="new-url"></small></label>
-          <label class="field"><span>Folder (optional)</span><input name="group" placeholder="Website, Mobile app…" list="new-groups"><datalist id="new-groups">${[...new Set(services.flatMap((s) => s.apis.map((a) => a.group)).filter(Boolean))].map((g) => `<option value="${esc(g)}">`).join('')}</datalist></label>
+          <label class="field"><span>Group (sub-folder, optional)</span><input name="group" placeholder="auth, blog, shop…" list="new-groups"><datalist id="new-groups">${[...new Set(services.flatMap((s) => s.apis.map((a) => a.group)).filter(Boolean))].map((g) => `<option value="${esc(g)}">`).join('')}</datalist>
+            <small>APIs of one group share a sub-folder, e.g. …/auth/login and …/auth/register.</small></label>
+          <label class="field"><span>Address name</span><input name="slug" class="mono" placeholder="products"></label>
         </div>
         <div id="new-server"></div>
+        <div class="new-url"><span class="small muted">Its address</span><div class="mono" id="new-url"></div></div>
       </div></div>
       <div class="row"><button class="btn-primary">Create API</button><a class="btn" href="${ctx.home}">Cancel</a></div>
     </form>`;
@@ -383,31 +501,93 @@ async function renderNew(el, ctx, pre) {
     if (!f.slug.dataset.touched) f.slug.value = slugify(f.title.value);
     urlChanged();
   }
+  // Where the API will live: { mode: site | domain | private, site, folder, domain }.
+  function where() {
+    const svc = pickedService();
+    if (svc?.site) return { mode: 'site', site: svc.site, folder: svc.folder, fixed: true };
+    const mode = f.where?.value || (svc?.domain ? 'domain' : 'private');
+    if (mode === 'site') return { mode, site: f.site?.value, folder: (f.folder?.value || '').trim().toLowerCase() };
+    if (mode === 'domain') return { mode, domain: svc?.domain || f.domain?.value.trim() };
+    return { mode: 'private' };
+  }
   function urlChanged() {
     const svc = pickedService();
-    const host = svc?.domain ? `https://${svc.domain}` : f.domain?.value ? `https://${f.domain.value}` : 'https://YOUR-API-ADDRESS';
+    const w = where();
+    const slug = f.slug.value || '…';
     const out = body.querySelector('#new-url');
-    out.textContent = `${host}/api/${f.slug.value || '…'}`;
-    if (svc && svc.apis.some((a) => a.slug === f.slug.value)) out.innerHTML += ' <b style="color:var(--bad)">already used: pick another address</b>';
+    let taken = svc && svc.apis.some((a) => a.slug === f.slug.value);
+    if (w.mode === 'site') {
+      const ws = websites.find((x) => x.name === w.site);
+      const p = pathIn(w.folder || '…', slug, f.group.value);
+      out.textContent = `${originOf(ws || { name: w.site })}${p}`;
+      // Another API of this website (any database) already has this address?
+      taken = taken || services.some((s) => s.site === w.site && Object.values(s.paths || {}).includes(p));
+    } else if (w.mode === 'domain') out.textContent = `https://${w.domain || 'YOUR-API-ADDRESS'}/api/${slug}`;
+    else out.innerHTML = `<span class="muted">Private for now: only this server can call it (/api/${esc(slug)}). Put it in a website later.</span>`;
+    if (taken) out.innerHTML += ' <b style="color:var(--bad)">already used: pick another name or group</b>';
+  }
+  function siteChanged() {
+    const ws = websites.find((x) => x.name === f.site?.value);
+    if (!f.folder) return;
+    // A website has one API folder: when it has one, every API of it lives there.
+    f.folder.value = ws?.folder || f.folder.dataset.mine || randomFolder();
+    f.folder.readOnly = Boolean(ws?.folder);
+    body.querySelector('#new-folder-note').innerHTML = ws?.folder
+      ? `${esc(ws.name)} already has the API folder <b class="mono">/${esc(ws.folder)}</b>; its APIs all live there.`
+      : 'Pick a name that is hard to guess: <span class="mono">/api</span> is the first thing people try.';
+    urlChanged();
   }
   function drawServer() {
     const svcs = serversFor(state.db);
     const box = body.querySelector('#new-server');
-    if (!svcs.length) {
-      const name = `${state.db}-api`.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 40);
-      box.innerHTML = `<div class="notice" style="margin-top:8px">This is the first API for <b>${esc(state.db)}</b>, so Serverboy also sets up its API server (about a minute).</div>
-        <div class="form-grid">
-          <label class="field"><span>Public address of the API server (optional)</span><input name="domain" value="${esc(suggestedDomain(name))}" placeholder="api.example.com">
-            <small>${location.hostname.endsWith('.sslip.io') ? 'This free sslip.io address works without buying a domain.' : "Point the domain's DNS to this server first."} Leave empty to keep it private to the server for now.</small></label>
-          <label class="check" style="margin-top:22px"><input type="checkbox" name="https" checked> Free HTTPS certificate (ports 80 and 443 must be open)</label>
-        </div><input type="hidden" name="newService" value="${esc(name)}">`;
-      box.querySelector('[name=domain]').addEventListener('input', urlChanged);
-    } else if (svcs.length > 1) {
-      box.innerHTML = `<label class="field"><span>Served by</span><select name="service">${svcs.map((s) => `<option ${s.name === pre.service ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>`;
-      box.querySelector('select').addEventListener('change', urlChanged);
+    const svc = pickedService();
+    const name = `${state.db}-api`.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 40);
+    const pick = svcs.length > 1 ? `<label class="field"><span>Served by</span><select name="service">${svcs.map((s) => `<option ${s.name === svc?.name ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>` : '';
+    if (svc?.needsUpgrade) {
+      box.innerHTML = pick + upgradeNotice(svc);
+    } else if (svc?.site) {
+      box.innerHTML = `${pick}<p class="small muted" style="margin:8px 0 0">Lives in the API folder of <b>${esc(svc.site)}</b>: <span class="mono">/${esc(svc.folder)}/</span> (API server ${esc(svc.name)}).</p>`;
     } else {
-      box.innerHTML = svcs[0].needsUpgrade ? upgradeNotice(svcs[0]) : `<p class="small muted">Served by the API server <b>${esc(svcs[0].name)}</b>${svcs[0].domain ? ` at ${esc(svcs[0].domain)}` : ' (not published yet: private to the server)'}.</p>`;
+      const usable = websites.filter((w) => w.enabled);
+      const firstSite = usable.find((w) => w.folder) || usable[0];
+      box.innerHTML = `${pick}
+        ${svc ? '' : `<div class="notice" style="margin-top:8px">This is the first API for <b>${esc(state.db)}</b>, so Serverboy also sets up its API server (about a minute).</div><input type="hidden" name="newService" value="${esc(name)}">`}
+        <div class="field" style="margin-top:10px"><span>Where should it live?</span>
+          <div class="where-opts">
+            <label class="check"><input type="radio" name="where" value="site" ${usable.length ? 'checked' : 'disabled'}> In a website's API folder${usable.length ? '' : ` <span class="small muted">(no website yet: <a href="#/s/${ctx.server.id}/sites">create one</a>)</span>`}</label>
+            <label class="check"><input type="radio" name="where" value="private" ${usable.length ? '' : 'checked'}> Private for now (only this server)</label>
+            ${svc ? '' : '<label class="check"><input type="radio" name="where" value="domain"> On its own address (a sub-domain just for APIs)</label>'}
+          </div></div>
+        <div id="where-site" class="form-grid">
+          <label class="field"><span>Website</span><select name="site">${usable.map((w) => `<option value="${esc(w.name)}" ${w === firstSite ? 'selected' : ''}>${esc(w.name)}${w.folder ? ` (/${esc(w.folder)})` : ''}${w.testMode ? ' · test mode' : ''}</option>`).join('')}</select></label>
+          <label class="field"><span>API folder</span><div class="row" style="flex-wrap:nowrap;gap:4px"><span class="mono muted">/</span><input name="folder" class="mono" placeholder="data-k3x9"></div><small id="new-folder-note"></small></label>
+        </div>
+        ${
+          svc
+            ? ''
+            : `<div id="where-domain" class="form-grid hidden">
+          <label class="field"><span>Address of the API server</span><input name="domain" value="${esc(suggestedDomain(name))}" placeholder="api.example.com">
+            <small>${location.hostname.endsWith('.sslip.io') ? 'This free sslip.io address works without buying a domain.' : "Point the domain's DNS to this server first."}</small></label>
+          <label class="check" style="margin-top:22px"><input type="checkbox" name="https" checked> Free HTTPS certificate (ports 80 and 443 must be open)</label>
+        </div>`
+        }`;
+      const sync = () => {
+        const m = f.where.value;
+        box.querySelector('#where-site').classList.toggle('hidden', m !== 'site');
+        box.querySelector('#where-domain')?.classList.toggle('hidden', m !== 'domain');
+        urlChanged();
+      };
+      box.querySelectorAll('[name=where]').forEach((r) => r.addEventListener('change', sync));
+      f.site?.addEventListener('change', siteChanged);
+      f.folder?.addEventListener('input', () => {
+        f.folder.dataset.mine = f.folder.value;
+        urlChanged();
+      });
+      box.querySelector('[name=domain]')?.addEventListener('input', urlChanged);
+      siteChanged();
+      sync();
     }
+    box.querySelector('[name=service]')?.addEventListener('change', drawServer);
     urlChanged();
   }
 
@@ -431,6 +611,7 @@ async function renderNew(el, ctx, pre) {
     f.slug.dataset.touched = '1';
     urlChanged();
   });
+  f.group.addEventListener('input', urlChanged);
   f.addEventListener('change', (e) => {
     if (e.target.name === 'template') {
       state.template = e.target.value;
@@ -470,22 +651,30 @@ async function renderNew(el, ctx, pre) {
     const slug = f.slug.value.trim() || slugify(f.title.value);
     const tpl = TEMPLATES[state.template];
     const apiBody = { slug, title: f.title.value.trim(), group: f.group.value.trim(), collection, ops: tpl.ops, timestamps: true, callerFilters: state.template !== 'form' };
-    const save = async (svcName) => {
+    const w = where();
+    if (w.mode === 'site' && !w.site) return toast('Choose a website', 'error');
+    if (w.mode === 'site' && !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(w.folder || '')) return toast('API folder: lowercase letters, numbers, - and _', 'error');
+    const save = async (svcName, mountIt) => {
       const ok = await run(btn, () => api(`${ctx.base}/${svcName}/resources/new`, { method: 'PUT', body: apiBody }));
-      if (ok) {
-        toast('API created. Try it out!', 'ok');
-        location.hash = ctx.apiUrl(svcName, slug, 'play');
+      if (!ok) return;
+      // An existing API server that was not in a website yet: put it in the chosen folder now.
+      if (mountIt) {
+        const m = await run(btn, () => api(`${ctx.base}/${svcName}/mount`, { method: 'POST', body: { site: w.site, folder: w.folder } }));
+        if (m?.changes?.length) toast(m.changes.join('. '), 'ok', 8000);
       }
+      toast('API created. Try it out!', 'ok');
+      location.hash = ctx.apiUrl(svcName, slug, 'play');
     };
     const svc = pickedService();
     if (!svc) {
       const name = f.newService.value;
-      const job = await run(btn, () => api(ctx.base, { method: 'POST', body: { name, database: state.db, domain: f.domain.value.trim(), https: f.https.checked } }));
+      const place = w.mode === 'site' ? { site: w.site, folder: w.folder } : w.mode === 'domain' ? { domain: (w.domain || '').trim(), https: f.https.checked } : {};
+      const job = await run(btn, () => api(ctx.base, { method: 'POST', body: { name, database: state.db, ...place } }));
       if (job) showJob(ctx.server.id, job, { onDone: (j) => (j?.status === 'failed' ? setupFailed(job, name) : save(name)) });
       return;
     }
     if (svc.needsUpgrade) return toast('Update the engine of this API server first (button above).', 'error');
-    save(svc.name);
+    save(svc.name, w.mode === 'site' && !svc.site);
   });
   loadCols();
 }
@@ -517,7 +706,7 @@ async function renderApi(el, ctx, svcName, slug, tab) {
   }
   const canEdit = (hasAll('databases') || dbAccess.find((d) => d.name === info.database)?.access === 'edit') && !info.needsUpgrade;
   const page = { tab, role: 'public', listPage: 1, search: '', lastItems: [], history: [], fields: inferFields(await ctx.samples(info.database, a.collection), a) };
-  const url = `${baseUrl(info)}/api/${slug}`;
+  const url = `${baseUrl(info)}${pathOf(info, slug)}`;
 
   el.innerHTML = `
     <div class="small" style="margin-bottom:6px"><a href="${ctx.home}">← All APIs</a></div>
@@ -529,7 +718,12 @@ async function renderApi(el, ctx, svcName, slug, tab) {
       <div class="row"><button class="btn-sm" data-action="diagnose" title="Find what is wrong and what to do next">🩺 Diagnose</button><a class="btn btn-sm" href="${ctx.docsUrl(svcName, slug)}">📖 Swagger</a><button class="btn-sm" data-action="downloadDocs">⬇ .txt</button><a class="btn btn-sm" href="${ctx.svcUrl(svcName, 'settings')}" title="API server ${esc(svcName)}">⚙ Server</a></div>
     </div>
     ${info.needsUpgrade ? upgradeNotice(info) : ''}
-    ${info.status === 'online' ? '' : `<div class="notice bad" style="margin-bottom:12px"><b>The API server ${esc(svcName)} is ${esc(info.status)}</b>, so this API cannot answer${info.status === 'not running' ? ' (and anything else on its port may answer instead)' : ''}. <button class="btn-sm btn-primary" data-action="diagnose">🩺 Diagnose and fix</button></div>`}
+    ${
+      info.copyOf
+        ? `<div class="notice warn" style="margin-bottom:12px"><b>This API belongs to ${esc(svcName)}, a copy of the API server ${esc(info.copyOf)}</b> (for example a backup restored as a copy). The copy is not used.${info.copyOf !== svcName ? ` <a class="btn btn-sm btn-primary" href="${ctx.apiUrl(info.copyOf, slug)}">Open the real one</a>` : ''} <a class="btn btn-sm" href="${ctx.home}">All APIs</a></div>`
+        : ''
+    }
+    ${info.status === 'online' || info.copyOf ? '' : `<div class="notice bad" style="margin-bottom:12px"><b>The API server ${esc(svcName)} is ${esc(info.status)}</b>, so this API cannot answer${info.status === 'not running' ? ' (and anything else on its port may answer instead)' : ''}. <button class="btn-sm btn-primary" data-action="diagnose">🩺 Diagnose and fix</button></div>`}
     <div id="addr-check"></div>
     <div class="tabs">${TABS.map(([id, label]) => `<button class="${tab === id ? 'active' : ''}" data-action="tab" data-tab="${id}">${label}</button>`).join('')}</div>
     <div id="api-body"></div>`;
@@ -675,7 +869,8 @@ async function renderApi(el, ctx, svcName, slug, tab) {
     const box = bodyEl.querySelector('#pg-result');
     if (!box) return;
     const p = plain(h);
-    const curl = [`curl${h.method === 'GET' ? '' : ` -X ${h.method}`} "${baseUrl(info)}${h.path}"`];
+    const pub = h.path.replace(`/api/${slug}`, pathOf(info, slug));
+    const curl = [`curl${h.method === 'GET' ? '' : ` -X ${h.method}`} "${baseUrl(info)}${pub}"`];
     if (h.role === 'key') curl.push('-H "x-api-key: YOUR_API_KEY"');
     if (h.reqBody) curl.push(`-H "content-type: application/json" -d '${JSON.stringify(h.reqBody).replace(/'/g, "'\\''")}'`);
     box.innerHTML = `
@@ -683,7 +878,7 @@ async function renderApi(el, ctx, svcName, slug, tab) {
         <div style="margin-top:6px">${esc(p.text)}</div>
         ${looksBroken(h.status, h.body) ? '<div class="row" style="margin-top:8px"><span class="small">This looks like a problem with the API server itself.</span><button class="btn-sm btn-primary" data-action="diagnose">🩺 Diagnose</button></div>' : ''}</div>
       <details style="margin-top:8px" ${h.op === 'get' ? 'open' : ''}><summary class="small"><b>Show the request and answer</b> (for developers)</summary>
-        <div class="mono small" style="margin:8px 0;word-break:break-all">${esc(h.method)} ${esc(baseUrl(info))}${esc(h.path)}${h.role === 'key' ? '<br>x-api-key: (Serverboy test key)' : ''}</div>
+        <div class="mono small" style="margin:8px 0;word-break:break-all">${esc(h.method)} ${esc(baseUrl(info))}${esc(pub)}${h.role === 'key' ? '<br>x-api-key: (Serverboy test key)' : ''}</div>
         ${h.reqBody ? `<div class="small muted">Sent:</div><pre class="log">${esc(JSON.stringify(h.reqBody, null, 2))}</pre>` : ''}
         <div class="small muted">Answer:</div><pre class="log" style="max-height:340px">${esc(typeof h.body === 'string' ? h.body : JSON.stringify(h.body, null, 2))}</pre>
         <div class="small muted">The same request in a terminal:</div><pre class="log">${esc(curl.join(' \\\n  '))}</pre>
@@ -827,7 +1022,7 @@ async function renderApi(el, ctx, svcName, slug, tab) {
         <h3 style="margin-top:0">Who can do what</h3>
         <div class="row small" style="margin-bottom:8px"><span class="muted">Quick choices:</span>${Object.entries(TEMPLATES).filter(([id]) => id !== 'custom').map(([id, t]) => `<button type="button" class="btn-sm" data-s="tpl" data-tpl="${id}">${esc(t.label)}</button>`).join('')}</div>
         <div class="table-wrap"><table class="who"><tbody>${OPS.map(
-          (o) => `<tr><td><b>${o.verb}</b><div class="small muted mono">${o.method} /api/${esc(slug)}${o.suffix}</div></td>
+          (o) => `<tr><td><b>${o.verb}</b><div class="small muted mono">${o.method} ${esc(pathOf(info, slug))}${o.suffix}</div></td>
             <td><div class="seg">${Object.entries(WHO).map(([m, l]) => `<label class="${a.ops[o.op] === m ? 'on' : ''}"><input type="radio" name="op-${o.op}" value="${m}" ${a.ops[o.op] === m ? 'checked' : ''}>${m === 'public' ? '🌐 ' : m === 'key' ? '🔑 ' : ''}${l}</label>`).join('')}</div></td></tr>`,
         ).join('')}</tbody></table></div>
         <p class="small muted" style="margin-bottom:0">"Apps with a key": make keys in the 🔑 Keys tab. Never put a key that can change data into web page code.</p>
@@ -845,7 +1040,7 @@ async function renderApi(el, ctx, svcName, slug, tab) {
             <label class="field"><span>MongoDB filter (JSON)</span><textarea name="filterJson" class="mono" rows="4">${esc(JSON.stringify(a.filter || {}, null, 2))}</textarea><small>Use "{{name}}" for a value from the link, e.g. { "author": "{{author}}" }, and list it below.</small></label>
             <label class="field"><span>Values from the link (JSON list)</span><textarea name="paramsJson" class="mono" rows="3">${esc(JSON.stringify(a.params || [], null, 2))}</textarea><small>e.g. [ { "name": "author", "type": "string", "required": true } ]</small></label>
           </div>
-          <p class="small muted">A value from the link: callers add it to the address, e.g. <span class="mono">/api/${esc(slug)}?author=ravi</span>. It is only ever used as a value, never as a command.</p>
+          <p class="small muted">A value from the link: callers add it to the address, e.g. <span class="mono">${esc(pathOf(info, slug))}?author=ravi</span>. It is only ever used as a value, never as a command.</p>
         </div>
         <label class="check"><input type="checkbox" name="callerFilters" ${a.callerFilters !== false ? 'checked' : ''}> Callers may narrow the list further (e.g. <span class="mono">?status=active</span>)</label>
       </div>
@@ -875,7 +1070,7 @@ async function renderApi(el, ctx, svcName, slug, tab) {
         <div class="form-grid">
           <label class="field"><span>Name</span><input name="title" value="${esc(a.title)}"></label>
           <label class="field"><span>Address</span><div class="row" style="flex-wrap:nowrap;gap:4px"><span class="mono muted">/api/</span><input name="slug" class="mono" value="${esc(slug)}"></div><small>Changing it breaks apps that use the old address.</small></label>
-          <label class="field"><span>Folder</span><input name="group" value="${esc(a.group || '')}" placeholder="Website, Mobile app…"></label>
+          <label class="field"><span>Group (sub-folder)</span><input name="group" value="${esc(a.group || '')}" placeholder="auth, blog, shop…"><small>${info.site ? `Its address: <span class="mono">/${esc(info.site.folder)}/&lt;group&gt;/${esc(slug)}</span>` : 'In a website, the group becomes a sub-folder of its address.'}</small></label>
           <label class="field"><span>Data (collection in ${esc(info.database)})</span><input name="collection" class="mono" value="${esc(a.collection)}" list="setup-cols"><datalist id="setup-cols"></datalist></label>
         </div>
         <label class="field"><span>Description (shown in the docs)</span><textarea name="description" rows="2" placeholder="What this API is for">${esc(a.description || '')}</textarea></label>
@@ -953,7 +1148,7 @@ async function renderApi(el, ctx, svcName, slug, tab) {
         e.target.textContent = toJson ? 'Use the simple editor' : 'Edit as JSON (advanced)';
       }
       if (s === 'delete') {
-        if (!(await confirmDialog(`Delete the API "${a.title}" (/api/${slug})? Apps using it stop working. The data in ${a.collection} is not touched.`, { danger: true, confirmLabel: 'Delete API' }))) return;
+        if (!(await confirmDialog(`Delete the API "${a.title}" (${pathOf(info, slug)})? Apps using it stop working. The data in ${a.collection} is not touched.`, { danger: true, confirmLabel: 'Delete API' }))) return;
         const ok = await run(null, () => api(`${ctx.base}/${svcName}/resources/${encodeURIComponent(slug)}`, { method: 'DELETE' }), 'API deleted');
         if (ok) location.hash = ctx.home;
       }
@@ -1220,7 +1415,7 @@ async function addressCheck(box, ctx, svcName, info, canEdit) {
 // ======================= diagnose: what is wrong, and what to do next =======================
 
 const DIAG_ICON = { ok: ['✔', 'ok'], warn: ['!', 'warn'], bad: ['✘', 'bad'], skip: ['–', ''] };
-const DIAG_BTN = { finish: 'Finish setup', restart: 'Restart it', logs: 'Open the logs', upgrade: 'Update engine', 'fix-address': 'Fix the address', publish: 'Publish on an address', 'move-port': 'Move to a free port' };
+const DIAG_BTN = { finish: 'Finish setup', restart: 'Restart it', logs: 'Open the logs', upgrade: 'Update engine', 'fix-address': 'Fix the address', publish: 'Publish on an address', 'move-port': 'Move to a free port', mount: 'Put in a website' };
 
 // Does a test answer look like the API server itself is broken (not just "this item does not exist")?
 export function looksBroken(status, body) {
@@ -1297,7 +1492,7 @@ export async function diagnose(ctx, svcName, slug, onChanged) {
       return;
     }
     if (!box.isConnected) return;
-    const label = (s) => (s.action === 'move-port' && s.id !== 'port' ? 'Make it independent' : DIAG_BTN[s.action]);
+    const label = (s) => (s.action === 'move-port' && s.id !== 'port' ? 'Make it independent' : s.action === 'mount' && s.status === 'bad' && /website/.test(s.title) && !/exist/.test(s.title) ? 'Update the website routes' : DIAG_BTN[s.action]);
     const btn = (s, primary) => (s.action && s.status !== 'ok' ? `<button class="btn-sm ${primary ? 'btn-primary' : ''}" data-diag="${s.action}">${label(s)}</button>` : '');
     const n = r.next;
     const allSteps = ['config', 'copy', 'port', 'setup', 'process', 'answer', 'database'];
@@ -1347,6 +1542,14 @@ export async function diagnose(ctx, svcName, slug, onChanged) {
       return;
     }
     if (act === 'upgrade') return upgrade(ctx, svcName, again);
+    if (act === 'mount') {
+      // Already in a website: write its routes again; else choose a website.
+      if (b.textContent.startsWith('Update')) {
+        if (await run(b, () => api(`${ctx.base}/${encodeURIComponent(svcName)}/mount`, { method: 'POST', body: {} }), 'Website routes written again')) again();
+        return;
+      }
+      return mountDialog(ctx, svcName, again);
+    }
     let info;
     try {
       info = await ctx.info(svcName);
@@ -1381,7 +1584,7 @@ async function renderService(el, ctx, svcName, startTab) {
   el.innerHTML = `
     <div class="small" style="margin-bottom:6px"><a href="${ctx.home}">← All APIs</a></div>
     <div class="page-head"><div><h1>API server: ${esc(info.name)} <span class="badge ${online ? 'ok' : 'bad'}" style="vertical-align:middle">${esc(info.status)}</span></h1>
-      <div class="sub">Answers the APIs for the database <b>${esc(info.database)}</b> · ${info.url ? `<a class="mono" href="${esc(info.url)}/health" target="_blank" rel="noopener">${esc(info.url)}</a>` : 'not published yet (private to the server)'}</div></div>
+      <div class="sub">Answers the APIs for the database <b>${esc(info.database)}</b> · ${info.site ? `lives in <span class="mono">${esc(info.site.url)}/${esc(info.site.folder)}/</span>` : info.url ? `<a class="mono" href="${esc(info.url)}/health" target="_blank" rel="noopener">${esc(info.url)}</a>` : 'not in a website yet (private to the server)'}</div></div>
       <div class="row"><button class="btn-sm" data-action="diagnose" title="Find what is wrong and what to do next">🩺 Diagnose</button></div></div>
     ${info.needsUpgrade ? upgradeNotice(info) : ''}
     <div id="addr-check"></div>
@@ -1405,7 +1608,7 @@ async function renderService(el, ctx, svcName, startTab) {
     const apis = Object.entries(info.apis || {});
     if (t === 'apis') {
       body.innerHTML = `<div class="api-cards">${apis
-        .map(([slug, a]) => `<a class="card api-card" href="${ctx.apiUrl(svcName, slug)}"><b>${esc(a.title)}</b><div class="mono small muted">/api/${esc(slug)}</div><p class="small" style="margin:8px 0 0">${esc(summary(a))}</p><div class="small muted">Data: ${esc(a.collection)}</div></a>`)
+        .map(([slug, a]) => `<a class="card api-card" href="${ctx.apiUrl(svcName, slug)}"><b>${esc(a.title)}</b><div class="mono small muted">${esc(pathOf(info, slug))}</div><p class="small" style="margin:8px 0 0">${esc(summary(a))}</p><div class="small muted">Data: ${esc(a.collection)}</div></a>`)
         .join('')}<a class="card api-card add" href="${ctx.home}/new/${encodeURIComponent(info.database)}/-/${encodeURIComponent(svcName)}">+ New API</a></div>`;
     } else if (t === 'keys') {
       body.innerHTML = `<div class="card flush"><div class="card-head"><h3 style="margin:0">Keys</h3>${canEdit && !info.needsUpgrade ? '<button class="btn-sm btn-primary" data-action="newKey">+ New key</button>' : ''}</div>
@@ -1435,12 +1638,17 @@ async function renderService(el, ctx, svcName, startTab) {
             <div class="card" style="margin-bottom:12px">
               <h3 style="margin-top:0">Address</h3>
               <table class="small"><tbody>
-                <tr><td class="muted" style="width:130px">On the internet</td><td class="mono">${info.url ? `<a href="${esc(info.url)}/health" target="_blank" rel="noopener">${esc(info.url)}</a>` : 'not yet'}</td></tr>
+                <tr><td class="muted" style="width:130px">In a website</td><td>${info.site ? `<span class="mono">${esc(info.site.url)}/${esc(info.site.folder)}/</span>${info.site.exists ? '' : ' <span class="badge bad">website gone</span>'}${info.site.testMode ? ' <span class="badge warn">test mode</span>' : ''}` : '<span class="muted">not yet</span>'}</td></tr>
+                ${info.domain ? `<tr><td class="muted">Own address</td><td class="mono"><a href="${esc(info.url && !info.site ? info.url : `http://${info.domain}`)}/health" target="_blank" rel="noopener">${esc(info.domain)}</a></td></tr>` : ''}
                 <tr><td class="muted">On the server</td><td class="mono">http://127.0.0.1:${esc(info.port)}</td></tr>
-                <tr><td class="muted">Folder</td><td class="mono">/var/www/${esc(info.name)}</td></tr>
+                <tr><td class="muted">Files</td><td class="mono">/var/www/${esc(info.name)}</td></tr>
                 <tr><td class="muted">Engine</td><td>v${esc(info.engine || '?')}${info.latestEngine && info.engine && info.engine < info.latestEngine ? ` (v${info.latestEngine} available)` : ''}</td></tr>
               </tbody></table>
-              ${canEdit && !info.url && info.port ? '<button class="btn-primary" data-action="publish" style="margin-top:10px">Publish on an address</button>' : ''}
+              <div class="row" style="margin-top:10px">${
+                canEdit && info.port && !info.copyOf
+                  ? `<button class="${info.site ? '' : 'btn-primary'}" data-action="mount">${info.site ? 'Move to another website' : 'Put in a website'}</button>${info.site ? '<button data-action="unmount">Take out of the website</button>' : ''}${!info.site && !info.domain ? '<button class="btn-ghost" data-action="publish">Own address instead</button>' : ''}`
+                  : ''
+              }</div>
             </div>
             ${
               canEdit
@@ -1469,7 +1677,7 @@ async function renderService(el, ctx, svcName, startTab) {
       box.innerHTML = `<label class="field"><span>Name</span><input name="label" placeholder="website backend" autocomplete="off"></label>
         <div class="table-wrap"><table class="small"><thead><tr><th>API</th>${KEY_RIGHTS.map(([, l]) => `<th>${l}</th>`).join('')}</tr></thead><tbody>
           <tr><td><b>Every API</b> <span class="muted">(also future ones)</span></td>${KEY_RIGHTS.map(([op]) => `<td><input type="checkbox" data-t="*" data-op="${op}"></td>`).join('')}</tr>
-          ${apis.map(([slug, a]) => `<tr><td>${esc(a.title)} <span class="mono muted">/api/${esc(slug)}</span></td>${KEY_RIGHTS.map(([op]) => `<td><input type="checkbox" data-t="${esc(slug)}" data-op="${op}" ${op === 'read' ? 'checked' : ''}></td>`).join('')}</tr>`).join('')}
+          ${apis.map(([slug, a]) => `<tr><td>${esc(a.title)} <span class="mono muted">${esc(pathOf(info, slug))}</span></td>${KEY_RIGHTS.map(([op]) => `<td><input type="checkbox" data-t="${esc(slug)}" data-op="${op}" ${op === 'read' ? 'checked' : ''}></td>`).join('')}</tr>`).join('')}
         </tbody></table></div>`;
       modal({
         title: `New key for ${info.name}`,
@@ -1502,6 +1710,11 @@ async function renderService(el, ctx, svcName, startTab) {
       }
     },
     publish: () => publishDialog(ctx, info, reload),
+    mount: () => mountDialog(ctx, svcName, reload),
+    unmount: async () => {
+      if (!(await confirmDialog(`Take ${svcName} out of ${info.site.name}? Its APIs stop answering at ${info.site.url}/${info.site.folder}/… (websites and apps that call them stop working). Nothing is deleted.`, { danger: true, confirmLabel: 'Take it out' }))) return;
+      if (await run(null, () => api(`${ctx.base}/${encodeURIComponent(svcName)}/unmount`, { method: 'POST' }), 'Taken out of the website')) reload();
+    },
     finish: () => finishDialog(ctx, info, reload),
     diagnose: () => diagnose(ctx, svcName, null, reload),
     deleteSvc: async () => {
