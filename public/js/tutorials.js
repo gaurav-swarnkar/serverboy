@@ -406,6 +406,27 @@ export const CHAPTERS = [
     ],
   },
   {
+    id: 'ai',
+    icon: 'sparkle',
+    title: 'AI connector (MCP)',
+    minutes: 3,
+    summary: 'Manage Serverboy by chatting with Claude or another AI agent.',
+    sections: [
+      { p: 'With the AI connector, you can ask Claude things like <i>"Is my server healthy?"</i> or <i>"Create an API for the products collection in my shop website"</i>, and it does it in Serverboy for you. It acts as you: it can do what you can do, and nothing more.' },
+      {
+        h: 'Connect Claude',
+        steps: [
+          'Open <b>AI connector</b> (in the menu under Preference) and copy the connector address. [[ai|Open AI connector]]',
+          'In Claude: <b>Settings → Connectors → Add custom connector</b>. Name it Serverboy, paste the address, click <b>Add</b>, then <b>Connect</b>.',
+          'Serverboy opens: choose <b>Look and manage</b> (or <b>Only look</b>) and click <b>Allow</b>.',
+          'In a chat, turn on the Serverboy connector and ask away.',
+        ],
+        tip: 'For Claude Code, Cursor and other agents, make a token on the AI connector page instead; it shows the command to paste.',
+      },
+      { h: 'Staying in control', list: ['Everything the AI changes is in the activity log, marked "(via AI: …)".', '"Only look" access cannot change anything.', 'Disconnect an app or revoke a token any time on the AI connector page.'] },
+    ],
+  },
+  {
     id: 'trouble',
     icon: 'help',
     title: 'When something breaks',
@@ -439,5 +460,6 @@ export const CHAPTER_FOR_VIEW = Object.fromEntries(
     ['admin-users', 'team'],
     ['admin-roles', 'team'],
     ['people', 'team'],
+    ['ai', 'ai'],
   ],
 );

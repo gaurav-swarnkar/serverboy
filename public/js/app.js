@@ -35,6 +35,7 @@ const views = {
   backups: () => import('./views/backups.js'),
   oneclick: () => import('./views/oneclick.js'),
   learn: () => import('./views/learn.js'),
+  ai: () => import('./views/ai.js'),
 };
 
 // Permission each page needs (null = anyone logged in). The server enforces the same rules.
@@ -63,6 +64,7 @@ const VIEW_PERMISSION = {
   backups: 'owner',
   oneclick: 'system',
   learn: null,
+  ai: null,
 };
 
 const SERVER_NAV = [
@@ -85,7 +87,7 @@ const PORTAL_NAV = [
     ],
   ],
   ['Learn', [['learn', 'book', 'Tutorials', '#/learn']]],
-  ['Preference', [['account', 'user', 'My account', '#/account']]],
+  ['Preference', [['account', 'user', 'My account', '#/account'], ['ai', 'sparkle', 'AI connector', '#/ai']]],
 ];
 
 // Title and one-line tagline in the top bar.
@@ -109,6 +111,7 @@ const PAGE_INFO = {
   messages: ['Messages', 'Talk to your team.'],
   account: ['My account', 'Your login and password.'],
   learn: ['Tutorials', 'Learn Serverboy step by step, in plain words.'],
+  ai: ['AI connector', 'Manage Serverboy from Claude or any other AI agent (MCP).'],
   'admin-users': ['Administration', 'Users, roles, activity and settings.'],
   'admin-roles': ['Administration', 'Users, roles, activity and settings.'],
   'admin-activity': ['Administration', 'Users, roles, activity and settings.'],
@@ -479,6 +482,12 @@ async function start() {
   }
   const me = await api('/me');
   if (!me.loggedIn) return showLogin();
+  // Sent here to log in while connecting an AI app (OAuth): go back to the approval page.
+  const back = new URLSearchParams(location.search).get('return');
+  if (back && /^\/oauth\/authorize\?/.test(back)) {
+    location.href = back;
+    return;
+  }
   session.user = me.user;
   startUpdateWatch();
   await refreshServers();

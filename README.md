@@ -81,6 +81,19 @@ The installer installs the newest **release**. Run the same command again any ti
 
 Got a domain later? Point it at the server and run the installer with it: `curl -fsSL …/install-on-server.sh | sudo bash -s panel.example.com you@example.com`. Change the password under **Settings** in Serverboy. Forgot it? Put a new one in `ADMIN_PASSWORD=` in `/etc/serverboy.env` (`sudo nano /etc/serverboy.env`) and run `sudo systemctl restart serverboy`.
 
+## AI connector (MCP)
+
+Manage Serverboy by chatting with Claude or any other AI agent that speaks the Model Context Protocol. Open **AI connector** (menu → Preference) for the address, `https://<your-serverboy>/mcp`.
+
+- **Claude (claude.ai, desktop and mobile apps):** Settings → Connectors → **Add custom connector** → name *Serverboy*, the address above → **Connect**. Serverboy asks you to log in and approve (**Look and manage** or **Only look**). This uses OAuth 2.1 with PKCE; the app gets a 1-hour token that renews itself.
+- **Claude Code:** make a token on the AI connector page, then
+  `claude mcp add --transport http serverboy https://<your-serverboy>/mcp --header "Authorization: Bearer sbt_…"`
+- **Other agents** (Cursor, Windsurf, VS Code…): add an HTTP MCP server with that URL and the `Authorization: Bearer` header.
+
+Tools (25): servers and health; websites (create, make live, HTTPS); databases, collections, find and insert documents; APIs (list, create in a website folder, Diagnose, restart); services and logs; Node apps (restart, redeploy, logs); backups; task status; a shell command (only with the Terminal permission); and `call_api` for any other Serverboy API endpoint.
+
+The AI acts as the person who connected it: same role, same website and database limits. *Only look* tokens can't change anything. Tokens can never manage tokens, passwords or "Log in as". Serverboy's self-protection still applies, and every change is in the activity log marked "(via AI: …)". Tokens are stored hashed; revoke or disconnect them on the AI connector page (the owner sees everyone's). Claude.ai needs Serverboy on **https** (the install command sets that up).
+
 ## Tutorials
 
 **Learn → Tutorials** (or the **?** button at the top of any page) explains Serverboy in plain words, chapter by chapter: getting started, dashboard, **websites**, **databases**, **APIs**, Node apps, 1-click apps, files, terminal, software, backups, firewall, alerts, team, and what to do when something breaks. Websites, Databases and APIs are full step-by-step guides; each step has a button that opens the right page on your server. The chapters live in `public/js/tutorials.js`.

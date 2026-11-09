@@ -42,6 +42,8 @@ app.use((req, res, next) => {
 // Webhooks (push-to-deploy) read the raw body to check signatures, so they come before the JSON parser.
 app.use('/hooks', require('./routes/hooks'));
 app.use(express.json({ limit: '20mb' }));
+// MCP connector for AI assistants (/mcp) and its OAuth sign-in (/oauth/*, /.well-known/*).
+app.use(require('./lib/mcp').router);
 
 const vendor = (pkg) => path.dirname(require.resolve(`${pkg}/package.json`));
 app.use('/vendor/xterm', express.static(vendor('@xterm/xterm')));
@@ -73,6 +75,7 @@ api.get('/version', async (req, res) => {
   res.json({ version: version.version, build: version.build, startedAt: version.startedAt, changelog: version.changelog, announcement: store.getAnnouncement(), unread: await people.unreadCount(req.user) });
 });
 api.use(people);
+api.use(require('./routes/ai'));
 api.use(require('./routes/servers'));
 api.use(require('./routes/team'));
 api.use(require('./routes/serverboy-backup'));

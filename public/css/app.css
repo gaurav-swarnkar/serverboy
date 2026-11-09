@@ -765,3 +765,5 @@ tr.deploy-live td { background: color-mix(in srgb, var(--accent-soft) 50%, trans
   .learn-arrow { display: none; }
   .learn-article { padding: 16px; }
 }
+.ai-steps { padding-left: 20px; margin: 0; display: grid; gap: 8px; line-height: 1.55; }
+.ai-code { white-space: pre-wrap; word-break: break-all; font-size: 12px; margin: 6px 0; }
