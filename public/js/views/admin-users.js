@@ -13,13 +13,15 @@ export async function render(el, { servers }) {
     info = await requireTeamDb(body, servers, load);
     if (!info) return;
     el.querySelector('[data-action=add]').disabled = false;
-    [users, roles] = await Promise.all([api('/team/users'), api('/team/roles')]);
+    let tfa = [];
+    [users, roles, tfa] = await Promise.all([api('/team/users'), api('/team/roles'), api('/2fa/users').catch(() => [])]);
+    const has2fa = (id) => tfa.includes(String(id));
     body.innerHTML = `
       <div class="card flush">
         <div class="table-wrap"><table>
-          <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Can do</th><th>Access</th><th>Status</th><th>Last login</th><th></th></tr></thead>
+          <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Can do</th><th>Access</th><th>Status</th><th>Two-step</th><th>Last login</th><th></th></tr></thead>
           <tbody>
-            <tr><td><b>admin</b><div class="small muted">You</div></td><td class="small">${esc(session.user.email || '')}</td><td><span class="badge accent">Owner</span></td><td><span class="small">Everything</span></td><td class="small">All</td><td><span class="badge ok">active</span></td><td></td><td></td></tr>
+            <tr><td><b>admin</b><div class="small muted">You</div></td><td class="small">${esc(session.user.email || '')}</td><td><span class="badge accent">Owner</span></td><td><span class="small">Everything</span></td><td class="small">All</td><td><span class="badge ok">active</span></td><td>${has2fa('owner') ? '<span class="badge ok">on</span>' : '<a class="badge warn" href="#/account">off</a>'}</td><td></td><td></td></tr>
             ${users
               .map(
                 (u, i) => `<tr>
@@ -29,17 +31,19 @@ export async function render(el, { servers }) {
               <td>${permissionBadges(u.permissions, info)}</td>
               <td class="small">${esc(scopeSummary(u.scope))}</td>
               <td>${u.disabled ? '<span class="badge bad">disabled</span>' : '<span class="badge ok">active</span>'}</td>
+              <td>${has2fa(u.id) ? '<span class="badge ok">on</span>' : '<span class="badge">off</span>'}</td>
               <td class="small">${u.lastLoginAt ? fmtDate(Date.parse(u.lastLoginAt)) : '<span class="muted">never</span>'}</td>
               <td class="actions">
                 ${u.disabled ? '' : `<button class="btn-sm" data-action="viewAs" data-i="${i}" title="Open ${esc(u.username)}'s account in a new tab to see exactly what they see">Log in as</button>`}
                 <button class="btn-sm" data-action="edit" data-i="${i}">Edit</button>
                 <button class="btn-sm" data-action="reset" data-i="${i}">Reset password</button>
+                ${has2fa(u.id) ? `<button class="btn-sm" data-action="reset2fa" data-i="${i}" title="For someone who lost their phone and recovery codes">Reset two-step</button>` : ''}
                 <button class="btn-sm" data-action="toggle" data-i="${i}">${u.disabled ? 'Enable' : 'Disable'}</button>
                 <button class="btn-sm btn-danger" data-action="remove" data-i="${i}">Delete</button>
               </td></tr>`,
               )
               .join('')}
-            ${users.length ? '' : '<tr><td colspan="8" class="empty">No team members yet. Click <b>+ Add user</b>.</td></tr>'}
+            ${users.length ? '' : '<tr><td colspan="9" class="empty">No team members yet. Click <b>+ Add user</b>.</td></tr>'}
           </tbody>
         </table></div>
       </div>
@@ -179,6 +183,11 @@ Password: ${esc(password)}</pre>
       const password = randomPassword(16);
       const ok = await run(null, () => api(`/team/users/${u.id}/password`, { method: 'POST', body: { password } }));
       if (ok) showCredentials(u.username, password, u.email);
+    },
+    reset2fa: async ({ i }) => {
+      const u = users[i];
+      if (!(await confirmDialog(`Turn off two-step login for ${u.username}? Use this when they lost their phone and their recovery codes. They log in with their password and set it up again.`, { confirmLabel: 'Reset two-step login' }))) return;
+      if (await run(null, () => api(`/2fa/reset/${u.id}`, { method: 'POST' }), 'Two-step login reset')) load();
     },
     toggle: async ({ i }, btn) => {
       const u = users[i];

@@ -158,8 +158,18 @@ router.post('/messages', async (req, res) => {
     replies: [],
   });
   team.audit({ user: req.user.username, ip: req.ip, action: `Sent a message "${subject.slice(0, 60)}" to ${to === 'all' ? 'everyone' : `${to.length} person(s)`}` });
+  pushMessage(to, me, { title: `${req.user.isOwner ? store.getOwnerProfile().name || 'Owner' : req.user.name || req.user.username}: ${subject}`, body: body.slice(0, 160), url: `/#/messages/${r.insertedId}` });
   res.json({ id: String(r.insertedId) });
 });
+
+// A push to each person a message is for (not to who wrote it). Best effort, never waits.
+function pushMessage(to, fromId, message) {
+  (async () => {
+    const ids = to === 'all' ? (await everyone()).map((p) => p.id) : to;
+    const push = require('../lib/push');
+    for (const id of ids) if (String(id) !== String(fromId) && id !== 'serverboy') push.notifyUser(id, { ...message, tag: message.url }, { kind: 'messages' });
+  })().catch(() => {});
+}
 
 async function findMessage(req) {
   const col = await messages();
@@ -182,6 +192,8 @@ router.post('/messages/:msgId/reply', async (req, res) => {
   const me = idOf(req.user);
   const reply = { fromId: me, fromName: req.user.isOwner ? store.getOwnerProfile().name || 'Owner' : req.user.name || req.user.username, body, at: new Date() };
   await col.updateOne({ _id: m._id }, { $push: { replies: reply }, $set: { lastAt: reply.at, readBy: [me] } });
+  // Everyone else in the conversation gets a push: the sender and the people it went to.
+  pushMessage(m.to === 'all' ? 'all' : [...new Set([m.fromId, ...m.to])], me, { title: `${reply.fromName} replied: ${m.subject}`, body: body.slice(0, 160), url: `/#/messages/${m._id}` });
   res.json({ ok: true });
 });
 

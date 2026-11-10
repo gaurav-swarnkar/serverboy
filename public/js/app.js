@@ -3,6 +3,7 @@ import { startUpdateWatch, paintUnread } from './updates.js';
 import { icon, logo } from './icons.js';
 import { getTheme, setTheme, shownTheme } from './theme.js';
 import { CHAPTERS, CHAPTER_FOR_VIEW } from './tutorials.js';
+import { registerServiceWorker } from './device.js';
 
 // Two areas:
 //   Portal  (#/servers, #/account, #/admin/...) - pick a server, your account, administration
@@ -36,6 +37,7 @@ const views = {
   oneclick: () => import('./views/oneclick.js'),
   learn: () => import('./views/learn.js'),
   ai: () => import('./views/ai.js'),
+  approve: () => import('./views/approve.js'),
 };
 
 // Permission each page needs (null = anyone logged in). The server enforces the same rules.
@@ -65,6 +67,7 @@ const VIEW_PERMISSION = {
   oneclick: 'system',
   learn: null,
   ai: null,
+  approve: null,
 };
 
 const SERVER_NAV = [
@@ -112,6 +115,7 @@ const PAGE_INFO = {
   account: ['My account', 'Your login and password.'],
   learn: ['Tutorials', 'Learn Serverboy step by step, in plain words.'],
   ai: ['AI connector', 'Manage Serverboy from Claude or any other AI agent (MCP).'],
+  approve: ['Approve login', 'Someone is logging in with your account.'],
   'admin-users': ['Administration', 'Users, roles, activity and settings.'],
   'admin-roles': ['Administration', 'Users, roles, activity and settings.'],
   'admin-activity': ['Administration', 'Users, roles, activity and settings.'],
@@ -179,18 +183,107 @@ function showLogin() {
     const btn = form.querySelector('button');
     btn.disabled = true;
     try {
-      await api('/login', { method: 'POST', body: { username: form.username.value, password: form.password.value } });
+      const r = await api('/login', { method: 'POST', body: { username: form.username.value, password: form.password.value } });
       try {
         localStorage.setItem('sb-last-login', form.username.value.trim());
       } catch {
         /* private mode */
       }
+      if (r.twoFactor) return showSecondStep(r);
       await start();
     } catch (err) {
       toast(err.message, 'error');
       btn.disabled = false;
     }
   });
+}
+
+// After the password: a code from the authenticator app, a recovery code, or an approval on a phone.
+function showSecondStep({ ticket, canApprove }) {
+  let polling = false;
+  app.innerHTML = `
+    <div class="login-wrap">
+      <form class="card login login-2fa">
+        <div class="login-brand">${logo(44)}<div><div class="login-name">Serverboy</div><div class="small muted">Two-step login</div></div></div>
+        <h1 class="login-title">One more step</h1>
+        <div id="tf-approve"></div>
+        <label class="field"><span>Code from your authenticator app</span><input name="code" class="code mono" inputmode="numeric" autocomplete="one-time-code" maxlength="14" placeholder="123456" required></label>
+        <button class="btn-primary btn-lg" style="width:100%;justify-content:center">Continue ${icon('arrow', 16)}</button>
+        ${canApprove ? '<button type="button" class="btn btn-lg" data-approve style="width:100%;justify-content:center;margin-top:10px">Approve on my phone instead</button>' : ''}
+        <p class="muted small" style="margin-bottom:0;text-align:center">Lost your phone? Type one of your recovery codes in the box. <a href="/" data-restart>Start over</a></p>
+      </form>
+    </div>`;
+  const form = app.querySelector('form');
+  form.code.focus();
+  const again = (msg) => {
+    polling = false;
+    if (msg) toast(msg, 'error', 8000);
+    showLogin();
+  };
+  app.querySelector('[data-restart]').addEventListener('click', (e) => {
+    e.preventDefault();
+    again();
+  });
+  form.addEventListener('submit', async () => {
+    const btn = form.querySelector('.btn-primary');
+    btn.disabled = true;
+    try {
+      await api('/login/2fa', { method: 'POST', body: { ticket, code: form.code.value } });
+      polling = false;
+      await start();
+    } catch (err) {
+      if (/expired|again/i.test(err.message) && /password/i.test(err.message)) return again(err.message);
+      toast(err.message, 'error');
+      btn.disabled = false;
+      form.code.select();
+    }
+  });
+  app.querySelector('[data-approve]')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      const r = await api('/login/approve', { method: 'POST', body: { ticket } });
+      app.querySelector('#tf-approve').innerHTML = `<div class="notice" style="text-align:center">Open the notification on your phone and tap<div class="approve-number">${r.number}</div><span class="small muted">Waiting for your phone…</span></div>`;
+      e.target.textContent = 'Send it again';
+      e.target.disabled = false;
+      if (polling) return;
+      polling = true;
+      while (polling) {
+        await new Promise((res) => setTimeout(res, 2000));
+        if (!polling) return;
+        const st = await api('/login/approve-status', { method: 'POST', body: { ticket } }).catch(() => ({ status: 'pending' }));
+        if (st.ok) {
+          polling = false;
+          return start();
+        }
+        if (st.status === 'denied') return again('The login was denied on your phone.');
+        if (st.status === 'expired') return again('The login request expired. Enter your password again.');
+      }
+    } catch (err) {
+      toast(err.message, 'error', 8000);
+      e.target.disabled = false;
+    }
+  });
+}
+
+// The owner requires two-step login and this person has not set it up: nothing else until they do.
+async function showEnroll() {
+  const { setupFlow } = await import('./security-ui.js');
+  app.innerHTML = `
+    <div class="login-wrap">
+      <div class="card login" style="max-width:520px">
+        <div class="login-brand">${logo(44)}<div><div class="login-name">Serverboy</div><div class="small muted">Two-step login is required</div></div></div>
+        <h1 class="login-title">Set up two-step login</h1>
+        <p class="muted">The owner asks everyone to use two-step login. It takes a minute, with an authenticator app on your phone.</p>
+        <div id="enroll"></div>
+        <p class="small" style="margin-bottom:0"><a href="#" id="enroll-out">Log out</a></p>
+      </div>
+    </div>`;
+  app.querySelector('#enroll-out').addEventListener('click', async (e) => {
+    e.preventDefault();
+    await api('/logout', { method: 'POST' }).catch(() => {});
+    showLogin();
+  });
+  setupFlow(app.querySelector('#enroll'), { onDone: () => start() });
 }
 
 function navLinks(sections, current, hrefFor) {
@@ -481,6 +574,7 @@ async function start() {
       return;
     }
   }
+  registerServiceWorker();
   const me = await api('/me');
   if (!me.loggedIn) return showLogin();
   // Sent here to log in while connecting an AI app (OAuth): go back to the approval page.
@@ -490,6 +584,7 @@ async function start() {
     return;
   }
   session.user = me.user;
+  if (me.user.twoFactor?.mustSetUp) return showEnroll();
   startUpdateWatch();
   await refreshServers();
   if (!location.hash || location.hash === '#/' || location.hash === '#') {

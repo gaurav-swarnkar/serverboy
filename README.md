@@ -81,6 +81,20 @@ The installer installs the newest **release**. Run the same command again any ti
 
 Got a domain later? Point it at the server and run the installer with it: `curl -fsSL …/install-on-server.sh | sudo bash -s panel.example.com you@example.com`. Change the password under **Settings** in Serverboy. Forgot it? Put a new one in `ADMIN_PASSWORD=` in `/etc/serverboy.env` (`sudo nano /etc/serverboy.env`) and run `sudo systemctl restart serverboy`.
 
+## The app, two-step login and notifications
+
+**Install the app.** Serverboy is an installable web app (PWA). In Chrome or Edge use the install icon in the address bar (or My account → **Install the app**); on iPhone/iPad open it in Safari → Share → **Add to Home Screen**. It opens like an app with its own icon. No app store needed.
+
+**Two-step login.** My account → **Two-step login** → scan the QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password), type its code, save the 10 recovery codes. After that every login asks for a code (or a recovery code). The owner can require it for everyone (Administration → Settings) and reset a member's two-step login (Users → Reset two-step). Connecting an AI app also asks for the code. Codes are standard TOTP (RFC 6238); secrets are stored encrypted, recovery codes as hashes.
+
+**Approve on your phone.** With notifications on, the login screen offers **Approve on my phone instead**: your phone gets a notification, you pick the number the login screen shows, and the login continues. A wrong number denies it.
+
+**Notifications.** My account → **Notifications** → Turn on (in the installed app on iPhone, iOS 16.4+). You get alerts (owner), team messages and login approvals, even with Serverboy closed. Pushes use the Web Push standard (VAPID, RFC 8292, and aes128gcm encryption, RFC 8291): your Serverboy signs and encrypts them itself, so no Apple, Google or other account is needed and the push service cannot read them.
+
+**Lost phone and recovery codes (owner):** on the server run
+`sudo -u serverboy DATA_DIR=/var/lib/serverboy node /opt/serverboy/scripts/reset-2fa.js admin`
+then `sudo systemctl restart serverboy`.
+
 ## AI connector (MCP)
 
 Manage Serverboy by chatting with Claude or any other AI agent that speaks the Model Context Protocol. Open **AI connector** (menu → Preference) for the address, `https://<your-serverboy>/mcp`.

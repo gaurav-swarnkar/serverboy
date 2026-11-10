@@ -27,7 +27,7 @@ Shipped in v1.4.0 (Backups page) and v1.5.0 (test-restores, Serverboy backup). N
 ## 2. Security
 
 ### Login and accounts
-- [ ] **P0 Two-factor login (TOTP).** Done when: owner and team can enable an authenticator app, the owner can require it for everyone, and recovery codes exist.
+- [x] **P0 Two-factor login (TOTP).** Done when: owner and team can enable an authenticator app, the owner can require it for everyone, and recovery codes exist. Shipped in v1.13.0, plus login approval on a phone by push notification.
 - [ ] **P0 Per-account lockout.** Done when: failed logins are limited per username as well as per IP. Today the limit is per IP and in memory only, so it resets on restart.
 - [ ] **P1 Password rules.** Done when: there is a minimum length plus a check against common or leaked passwords, and the owner can force a reset.
 - [ ] **P1 Session list.** Done when: "Where you are logged in" shows device, IP and last use, with "Log out everywhere". The owner sees everyone's sessions.
@@ -99,7 +99,7 @@ Already done: roles, per-site and per-database scope, activity log, Log in as, m
 - [ ] **P1 Documentation site.** Done when: install, update, backup/restore, Data API and troubleshooting guides exist, and each page in the app links to its guide (the ? button).
 - [ ] **P1 First-run setup wizard.** Done when: there are guided steps for the first server, firewall, MongoDB auth, backups and alerts.
 - [ ] **P1 Accessibility pass.** Done when: everything can be done by keyboard, labels are present, and both themes pass contrast checks.
-- [ ] **P2 Mobile-first quick actions.** Done when: restart an app, see alerts and Make live work comfortably on a phone.
+- [ ] **P2 Mobile-first quick actions.** Done when: restart an app, see alerts and Make live work comfortably on a phone. Installable app (PWA) with push notifications shipped in v1.13.0.
 - [ ] **P2 Translations.**
 
 ## 8. Out of scope (on purpose)

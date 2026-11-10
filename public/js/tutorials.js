@@ -430,6 +430,48 @@ export const CHAPTERS = [
     ],
   },
   {
+    id: 'app',
+    icon: 'shield',
+    title: 'The app, two-step login and notifications',
+    minutes: 4,
+    summary: 'Install Serverboy on your phone, protect your login, and get alerts there.',
+    view: 'account',
+    sections: [
+      { p: 'Serverboy installs on your phone or computer like an app. With two-step login, a stolen password is not enough to get in. With notifications on, alerts, messages and login requests reach you even when Serverboy is closed.' },
+      {
+        h: 'Install the app',
+        steps: [
+          '<b>Android, Windows, Mac (Chrome or Edge):</b> open Serverboy, then the install icon in the address bar or the menu → <b>Install Serverboy</b>. Or My account → <b>Install the app</b>.',
+          '<b>iPhone and iPad:</b> open Serverboy in Safari → <b>Share</b> → <b>Add to Home Screen</b> → <b>Add</b>. Open it from the Home Screen from now on.',
+        ],
+      },
+      {
+        h: 'Turn on two-step login',
+        steps: [
+          'Install an authenticator app on your phone: Google Authenticator, Microsoft Authenticator, Authy or 1Password.',
+          'Open <b>My account</b> → <b>Two-step login</b> → <b>Turn on two-step login</b>. [[account|Open My account]]',
+          'Scan the QR code with the app, type the 6-digit code it shows, and click <b>Turn on</b>.',
+          '<b>Save the 10 recovery codes</b> (download or copy them into a password manager). Each works once if you lose your phone.',
+        ],
+        tip: 'From now on Serverboy asks for a code after your password. Owners can require it for everyone: Administration → Settings → Two-step login.',
+      },
+      {
+        h: 'Turn on notifications and approve logins',
+        steps: [
+          'In the app on your phone, open <b>My account</b> → <b>Notifications</b> → <b>Turn on</b>, and allow notifications.',
+          'Click <b>Send a test</b>: a notification should appear within seconds.',
+          'Next time you log in somewhere else, click <b>Approve on my phone instead</b>. Your phone gets a notification; tap it and pick the number the login screen shows.',
+        ],
+        faq: [
+          ['I lost my phone', 'Log in with one of your recovery codes, then turn two-step login off and on again with your new phone. Team members can also ask the owner: Users → <b>Reset two-step</b>.'],
+          ['The owner lost their phone and the recovery codes', 'On the server run <span class="mono">sudo -u serverboy DATA_DIR=/var/lib/serverboy node /opt/serverboy/scripts/reset-2fa.js admin</span>, then <span class="mono">sudo systemctl restart serverboy</span>.'],
+          ['Notifications do not arrive on iPhone', 'They only work in the app added to the Home Screen (iOS 16.4 or newer), not in a Safari tab. Turn them on from inside the app.'],
+          ['A login approval I did not ask for', 'Tap <b>This wasn\'t me: deny</b>, then change your password: someone knows it.'],
+        ],
+      },
+    ],
+  },
+  {
     id: 'trouble',
     icon: 'help',
     title: 'When something breaks',
@@ -464,5 +506,6 @@ export const CHAPTER_FOR_VIEW = Object.fromEntries(
     ['admin-roles', 'team'],
     ['people', 'team'],
     ['ai', 'ai'],
+    ['approve', 'app'],
   ],
 );

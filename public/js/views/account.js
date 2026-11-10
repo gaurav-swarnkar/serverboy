@@ -1,4 +1,5 @@
 import { api, run, toast, esc, session } from '../ui.js';
+import { twoFactorCard, notificationsCard, installCard } from '../security-ui.js';
 
 const LABELS = {
   databases: 'Manage databases',
@@ -13,7 +14,7 @@ const LABELS = {
 export async function render(el) {
   const u = session.user;
   el.innerHTML = `
-    <div class="page-head"><div><h1>My account</h1><div class="sub">Your login and what you are allowed to do.</div></div></div>
+    <div class="page-head"><div><h1>My account</h1><div class="sub">Your login, two-step login, notifications and what you are allowed to do.</div></div></div>
     <div class="grid grid-2" style="align-items:start">
       <div class="card">
         <h2>Profile</h2>
@@ -46,7 +47,17 @@ export async function render(el) {
           <button class="btn-primary">Change password</button>
         </form>
       </div>
-    </div>`;
+    </div>
+    <div class="grid grid-2" style="align-items:start;margin-top:14px">
+      <div class="card" id="sec-2fa"></div>
+      <div class="card" id="sec-push"></div>
+    </div>
+    <div class="card" id="sec-app" style="margin-top:14px"></div>`;
+  if (!u.viewAs) {
+    twoFactorCard(el.querySelector('#sec-2fa'));
+    notificationsCard(el.querySelector('#sec-push'));
+  } else el.querySelector('#sec-2fa').innerHTML = '<p class="muted">Two-step login and notifications belong to the person themselves.</p>';
+  installCard(el.querySelector('#sec-app'));
   el.querySelector('#email-form')?.addEventListener('submit', async (e) => {
     const r = await run(e.target.querySelector('button'), () => api('/account/email', { method: 'POST', body: { email: e.target.email.value } }), 'Email saved');
     if (r) session.user.email = r.email;

@@ -767,3 +767,16 @@ tr.deploy-live td { background: color-mix(in srgb, var(--accent-soft) 50%, trans
 }
 .ai-steps { padding-left: 20px; margin: 0; display: grid; gap: 8px; line-height: 1.55; }
 .ai-code { white-space: pre-wrap; word-break: break-all; font-size: 12px; margin: 6px 0; }
+
+/* Two-step login, notifications, the app */
+.sec-steps { padding-left: 20px; margin: 0; display: grid; gap: 12px; line-height: 1.5; }
+.sec-qr { margin: 10px 0; width: 210px; max-width: 100%; background: #fff; border-radius: 12px; padding: 6px; }
+.sec-qr svg { display: block; width: 100%; height: auto; }
+.sec-key { padding: 8px 10px; background: var(--panel-2); border-radius: 8px; word-break: break-all; margin-top: 6px; font-size: 14px; }
+.sec-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; padding: 12px; background: var(--panel-2); border-radius: 12px; font-size: 15px; }
+.sec-device { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px; border-radius: 12px; background: var(--panel-2); }
+.sec-device > div { flex: 1; min-width: 180px; }
+.login-2fa .code { font-size: 22px; letter-spacing: 4px; text-align: center; }
+.approve-number { font: 700 54px/1 var(--font-display, inherit); text-align: center; margin: 10px 0 4px; letter-spacing: 2px; }
+.approve-choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0; }
+.approve-choices button { font-size: 28px; font-weight: 700; padding: 18px 0; border-radius: 16px; justify-content: center; }

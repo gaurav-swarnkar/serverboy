@@ -7,6 +7,7 @@ export async function render(el, { servers }) {
   el.innerHTML = `${adminHead('Settings', 'Where team accounts are stored, updates and messages to the team, backups of Serverboy itself, and how the owner login works.')}<div id="db"></div>
     <div id="updates" style="margin-top:16px"></div>
     <div id="sbbackup" style="margin-top:16px"></div>
+    <div class="card" style="margin-top:16px;max-width:780px" id="tfa-settings"></div>
     <div class="card" style="margin-top:16px;max-width:780px">
       <h2>Owner login</h2>
       <p class="muted" style="margin-top:0">You log in as <b>admin</b>. This login is stored by Serverboy itself, not in MongoDB, so it keeps working even if the database is down.</p>
@@ -17,6 +18,7 @@ export async function render(el, { servers }) {
     </div>`;
   const db = el.querySelector('#db');
   mountSelfBackup(el.querySelector('#sbbackup'));
+  mountTwoStep(el.querySelector('#tfa-settings'));
 
   async function load() {
     db.innerHTML = loadingHtml();
@@ -135,4 +137,26 @@ export async function render(el, { servers }) {
 
   load();
   loadUpdates();
+}
+
+// Require two-step login for everyone (the owner must have it on first).
+async function mountTwoStep(box) {
+  const draw = async () => {
+    let st;
+    try {
+      st = await api('/2fa/status');
+    } catch (err) {
+      box.innerHTML = errorHtml(err);
+      return;
+    }
+    box.innerHTML = `<h2>Two-step login</h2>
+      <p class="muted" style="margin-top:0">After the password, a code from an authenticator app (or an approval on a phone). Protects every server Serverboy controls if a password leaks.</p>
+      <label class="check"><input type="checkbox" data-req ${st.required ? 'checked' : ''} ${st.enabled ? '' : 'disabled'}> <b>Require two-step login for everyone</b></label>
+      <p class="small muted" style="margin-bottom:0">${st.enabled ? 'Team members without it must set it up at their next login before they can do anything else. See who has it under <a href="#/admin/users">Users</a>.' : 'Turn it on for yourself first under <a href="#/account">My account</a>.'}</p>`;
+    box.querySelector('[data-req]').addEventListener('change', async (e) => {
+      const ok = await run(null, () => api('/2fa/settings', { method: 'PUT', body: { required: e.target.checked } }), e.target.checked ? 'Two-step login is now required for everyone' : 'No longer required');
+      if (!ok) e.target.checked = !e.target.checked;
+    });
+  };
+  draw();
 }

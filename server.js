@@ -49,6 +49,7 @@ const vendor = (pkg) => path.dirname(require.resolve(`${pkg}/package.json`));
 app.use('/vendor/xterm', express.static(vendor('@xterm/xterm')));
 app.use('/vendor/xterm-addon-fit', express.static(vendor('@xterm/addon-fit')));
 app.use('/vendor/swagger-ui', express.static(vendor('swagger-ui-dist')));
+app.use('/vendor/qrcode', express.static(vendor('qrcode-generator')));
 app.use('/vendor/inter', express.static(path.join(vendor('@fontsource-variable/inter'), 'files')));
 // Always revalidate (cheap, ETag) so a refresh after an update never runs stale code.
 app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
@@ -76,6 +77,7 @@ api.get('/version', async (req, res) => {
 });
 api.use(people);
 api.use(require('./routes/ai'));
+api.use(require('./routes/security'));
 api.use(require('./routes/servers'));
 api.use(require('./routes/team'));
 api.use(require('./routes/serverboy-backup'));
