@@ -92,7 +92,7 @@ Manage Serverboy by chatting with Claude or any other AI agent that speaks the M
 
 Tools (26): servers and health; websites (create, make live, HTTPS); databases, collections, find and insert documents; APIs (list, create in a website folder, Diagnose, restart); services and logs; Node apps (restart, redeploy, logs); backups; task status; a shell command (only with the Terminal permission); and `call_api` for any other Serverboy API endpoint.
 
-The AI acts as the person who connected it: same role, same website and database limits. *Only look* tokens can't change anything. Tokens can never manage tokens, passwords or "Log in as". Serverboy's self-protection still applies, and every change is in the activity log marked "(via AI: …)". Tokens are stored hashed; revoke or disconnect them on the AI connector page (the owner sees everyone's). Claude.ai needs Serverboy on **https** (the install command sets that up).
+**Everyone on the team** can connect their own AI (AI connector is in the menu and in the account menu at the top right). Each person's AI only sees the tools their role allows. The AI acts as the person who connected it: same role, same website and database limits. *Only look* tokens can't change anything. Tokens can never manage tokens, passwords or "Log in as". Serverboy's self-protection still applies, and every change is in the activity log marked "(via AI: …)". Tokens are stored hashed; revoke or disconnect them on the AI connector page (the owner sees everyone's). Claude.ai needs Serverboy on **https** (the install command sets that up).
 
 ## Tutorials
 

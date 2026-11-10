@@ -20,7 +20,7 @@ export async function render(el) {
   const user = session.user;
   let showAll = false;
   el.innerHTML = `
-    <div class="page-head"><div><h1>AI connector</h1><div class="sub">Manage Serverboy from Claude or any other AI agent (MCP). It can do what you can do here, and nothing more.</div></div></div>
+    <div class="page-head"><div><h1>AI connector</h1><div class="sub">Manage Serverboy from Claude or any other AI agent (MCP). Everyone on the team can connect their own AI: it can do what that person can do here, and nothing more.</div></div></div>
     <div class="card" style="margin-bottom:14px">
       <h3 style="margin-top:0">Connector address</h3>
       <div class="row" style="flex-wrap:nowrap"><input class="mono" readonly value="${esc(url)}" style="flex:1"><button data-act="copyUrl">Copy</button></div>
@@ -57,7 +57,7 @@ export async function render(el) {
       <div id="ai-list">${loadingHtml()}</div>
     </div>
     <div class="card" style="margin-top:14px">
-      <h3 style="margin-top:0">What an AI can do</h3>
+      <h3 style="margin-top:0">What ${user.isOwner ? 'an AI' : 'your AI'} can do</h3>${user.isOwner ? '' : `<p class="small muted" style="margin-top:0">Only what your role allows (${esc(user.role || 'your role')}): it sees only the matching tools.</p>`}
       <table class="small"><tbody>${TOOLS.map(([k, v]) => `<tr><td style="width:120px"><b>${k}</b></td><td>${v}</td></tr>`).join('')}</tbody></table>
       <p class="small muted" style="margin-bottom:0">It acts as you: your role, and only your websites and databases. "Only look" tokens cannot change anything. It can never make tokens, change passwords or log in as someone else, and Serverboy's self-protection still applies. Everything it changes appears in the activity log with "(via AI: …)".</p>
     </div>`;

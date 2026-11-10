@@ -278,6 +278,7 @@ function renderShell(current) {
             <hr>
             <a href="#/people/me">${icon('user', 16)} My profile</a>
             <a href="#/account">${icon('key', 16)} My account & password</a>
+            <a href="#/ai">${icon('sparkle', 16)} AI connector</a>
             <a href="#/messages">${icon('mail', 16)} Messages</a>
             <a href="#/people">${icon('users', 16)} Team</a>
             ${user.isOwner ? `<a href="#/admin/users">${icon('shield', 16)} Administration</a><a href="#/admin/settings">${icon('settings', 16)} Settings</a>` : ''}

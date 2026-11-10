@@ -426,7 +426,7 @@ export const CHAPTERS = [
         ],
         tip: 'For Claude Code, Cursor and other agents, make a token on the AI connector page instead; it shows the command to paste.',
       },
-      { h: 'Staying in control', list: ['Everything the AI changes is in the activity log, marked "(via AI: …)".', '"Only look" access cannot change anything.', 'Disconnect an app or revoke a token any time on the AI connector page.'] },
+      { h: 'Staying in control', list: ['Everyone on the team can connect their own AI. It can only do what that person\'s role allows.', 'Everything the AI changes is in the activity log, marked "(via AI: …)".', '"Only look" access cannot change anything.', 'Disconnect an app or revoke a token any time on the AI connector page.'] },
     ],
   },
   {
