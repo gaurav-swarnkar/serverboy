@@ -25,6 +25,7 @@ router.put('/servers/:id', ownerOnly, (req, res) => {
 router.delete('/servers/:id', ownerOnly, (req, res) => {
   ssh.disconnect(req.params.id);
   if (!store.removeServer(req.params.id)) return res.status(404).json({ error: 'Server not found' });
+  require('../lib/health-ignore').removeServer(req.params.id);
   res.json({ ok: true });
 });
 

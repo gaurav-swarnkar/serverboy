@@ -780,3 +780,6 @@ tr.deploy-live td { background: color-mix(in srgb, var(--accent-soft) 50%, trans
 .approve-number { font: 700 54px/1 var(--font-display, inherit); text-align: center; margin: 10px 0 4px; letter-spacing: 2px; }
 .approve-choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0; }
 .approve-choices button { font-size: 28px; font-weight: 700; padding: 18px 0; border-radius: 16px; justify-content: center; }
+.hc-ignored { margin: 8px 0 4px; }
+.hc-ignored summary { cursor: pointer; padding: 4px 0; }
+.hc-problem.ignored { opacity: .75; }

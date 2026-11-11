@@ -42,7 +42,7 @@ export const CHAPTERS = [
       { p: 'The Dashboard shows how busy the server is (CPU, memory, disk) and a list of problems Serverboy found, such as a website that is down, a full disk or a stopped service.' },
       {
         h: 'Using it',
-        steps: ['Open the server and look at the <b>health card</b> at the top.', 'Each problem says what is wrong in plain words. Many have a <b>Fix</b> button.', 'Green everywhere means nothing needs your attention.'],
+        steps: ['Open the server and look at the <b>health card</b> at the top.', 'Each problem says what is wrong in plain words. Many have a <b>Fix</b> button.', 'A warning you know about and accept? Click <b>Ignore</b> (for 7 days, 30 days or always). It leaves the count and the alerts; bring it back under "ignored warnings".', 'Green everywhere means nothing needs your attention.'],
         link: 'dashboard|Open the Dashboard',
       },
     ],

@@ -14,6 +14,7 @@ router.get('/health', async (req, res) => {
     // Only show the websites this person has access to.
     result.sites = result.sites.filter((s) => scope.canSeeSite(req.user, req.params.id, s.domain) || scope.canSeeSite(req.user, req.params.id, s.file));
     result.problems = result.problems.filter((p) => p.area !== 'site' || p.target === 'nginx' || result.sites.some((s) => s.domain === p.target));
+    result.ignored = (result.ignored || []).filter((p) => p.area !== 'site' || p.target === 'nginx' || result.sites.some((s) => s.domain === p.target));
     result.status = result.problems.some((p) => p.level === 'bad') ? 'bad' : result.problems.length ? 'warn' : 'ok';
   }
   res.json(result);
@@ -32,6 +33,21 @@ router.post('/health/fix', async (req, res) => {
   const result = await health.applyFix(req.params.id, fix, unit);
   team.audit({ user: req.user.username, ip: req.ip, action: `Health fix: ${def.label}${unit ? ` (${unit})` : ''}`, status: result.ok ? 200 : 500 });
   res.json(result);
+});
+
+// Ignore a warning (7 or 30 days, or always), or bring it back.
+router.post('/health/ignore', (req, res) => {
+  const days = [0, 7, 30].includes(Number(req.body?.days)) ? Number(req.body.days) : 7;
+  const r = require('../lib/health-ignore').ignore(req.params.id, req.body?.key, { days, by: req.user.username, text: req.body?.text });
+  team.audit({ user: req.user.username, ip: req.ip, action: `Ignored a health warning${days ? ` for ${days} days` : ''}: ${String(req.body?.text || req.body?.key).slice(0, 120)}` });
+  res.json(r);
+});
+
+router.delete('/health/ignore', (req, res) => {
+  const ok = require('../lib/health-ignore').unignore(req.params.id, String(req.body?.key || ''));
+  if (!ok) throw new HttpError(404, 'Not ignored');
+  team.audit({ user: req.user.username, ip: req.ip, action: `Stopped ignoring a health warning: ${String(req.body?.key).slice(0, 120)}` });
+  res.json({ ok: true });
 });
 
 module.exports = router;

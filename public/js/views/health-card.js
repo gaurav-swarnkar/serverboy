@@ -57,9 +57,19 @@ export function mountHealth(el, server, { onData } = {}) {
                   <span>${DOT[p.level]}</span>
                   <div class="grow"><b>${esc(p.text)}</b>${p.hint ? `<div class="small muted">${esc(p.hint)}</div>` : ''}</div>
                   ${problemAction(p)}
+                  ${can('services') ? `<button class="btn-sm btn-ghost" data-action="hc-ignore" data-key="${esc(p.key)}" data-text="${esc(p.text)}" data-level="${p.level}" title="Stop showing this warning">Ignore</button>` : ''}
                 </div>`,
               )
               .join('')}</div>`
+          : ''
+      }
+      ${
+        (d.ignored || []).length
+          ? `<details class="hc-ignored"><summary class="small muted">${d.ignored.length} ignored warning${d.ignored.length > 1 ? 's' : ''}</summary>${d.ignored
+              .map(
+                (p) => `<div class="hc-problem ignored"><span>${DOT[p.level]}</span><div class="grow"><span>${esc(p.text)}</span><div class="small muted">Ignored ${p.until ? `until ${new Date(p.until).toLocaleDateString()}` : 'always'}${p.ignoredBy ? ` by ${esc(p.ignoredBy)}` : ''}</div></div>${can('services') ? `<button class="btn-sm" data-action="hc-unignore" data-key="${esc(p.key)}">Stop ignoring</button>` : ''}</div>`,
+              )
+              .join('')}</details>`
           : ''
       }
       <div class="hc-grid">
@@ -82,11 +92,11 @@ export function mountHealth(el, server, { onData } = {}) {
             <div class="table-wrap" style="max-height:none"><table><tbody>${d.sites
               .map(
                 (s) => `<tr>
-                  <td style="width:28px">${DOT[s.level]}</td>
+                  <td style="width:28px">${s.ignored ? DOT.off || '⚪' : DOT[s.level]}</td>
                   <td><a href="${s.ssl ? 'https' : 'http'}://${esc(s.domain)}" target="_blank" rel="noopener">${esc(s.domain)}</a></td>
                   <td class="small">${s.code ? `HTTP ${s.code}` : 'no answer'}${s.ms ? ` · ${s.ms} ms` : ''}</td>
                   <td class="small">${s.ssl ? (s.certDays !== null ? `🔒 ${s.certDays} days left` : '🔒') : '<span class="muted">no SSL</span>'}</td>
-                  <td class="small">${esc(s.text)}</td>
+                  <td class="small">${s.apiOnly ? '<span class="badge">API address</span> ' : ''}${esc(s.apiOnly ? 'no home page, which is fine' : s.text)}${s.ignored ? ' <span class="muted">(ignored)</span>' : ''}</td>
                 </tr>`,
               )
               .join('')}</tbody></table></div>`
@@ -189,6 +199,40 @@ export function mountHealth(el, server, { onData } = {}) {
       try {
         await api(`/servers/${server.id}/backups/local-only`, { method: 'POST', body: { ok: true } });
         toast('OK. Backups stay on this server; the warning is hidden.', 'ok');
+        load();
+      } catch (err) {
+        toast(err.message, 'error');
+        btn.disabled = false;
+      }
+    },
+    'hc-ignore': async ({ key, text, level }) => {
+      const box = document.createElement('div');
+      box.innerHTML = `<p style="margin-top:0">${esc(text)}</p>
+        ${level === 'bad' ? '<div class="notice warn" style="margin-bottom:10px">This is a problem, not just a warning. Ignoring it also stops its alerts.</div>' : ''}
+        <label class="field"><span>Ignore it</span><select name="days"><option value="7">for 7 days</option><option value="30">for 30 days</option><option value="0">always</option></select></label>
+        <p class="small muted" style="margin-bottom:0">It leaves the dashboard and alerts. Bring it back any time under "ignored warnings".</p>`;
+      modal({
+        title: 'Ignore this warning?',
+        body: box,
+        actions: [
+          { label: 'Cancel' },
+          {
+            label: 'Ignore',
+            className: 'btn-primary',
+            onClick: async () => {
+              await api(`${base}/health/ignore`, { method: 'POST', body: { key, text, days: Number(box.querySelector('select').value) } });
+              toast('Ignored', 'ok');
+              load();
+            },
+          },
+        ],
+      });
+    },
+    'hc-unignore': async ({ key }, btn) => {
+      btn.disabled = true;
+      try {
+        await api(`${base}/health/ignore`, { method: 'DELETE', body: { key } });
+        toast('Shown again', 'ok');
         load();
       } catch (err) {
         toast(err.message, 'error');
