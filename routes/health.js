@@ -10,6 +10,15 @@ const router = express.Router({ mergeParams: true });
 
 router.get('/health', async (req, res) => {
   const result = await health.check(req.params.id);
+  // Node apps (API servers among them, named after their databases) only for people who manage
+  // Node apps; backup warnings only for the owner, who handles backups.
+  if (!req.user.isOwner) {
+    const keep = (p) => (p.area !== 'app' || can(req.user, 'nodeapps')) && p.area !== 'backup';
+    if (!can(req.user, 'nodeapps')) result.apps = [];
+    result.problems = result.problems.filter(keep);
+    result.ignored = (result.ignored || []).filter(keep);
+    result.status = result.problems.some((p) => p.level === 'bad') ? 'bad' : result.problems.length ? 'warn' : 'ok';
+  }
   if (!scope.isAll(req.user, 'sites')) {
     // Only show the websites this person has access to.
     result.sites = result.sites.filter((s) => scope.canSeeSite(req.user, req.params.id, s.domain) || scope.canSeeSite(req.user, req.params.id, s.file));

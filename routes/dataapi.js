@@ -1105,7 +1105,8 @@ router.get('/mongo/apis/:name/logs', async (req, res) => {
 // Websites with their API folder, for "where should the API live?".
 router.get('/mongo/api-folders', async (req, res) => {
   const list = await mounts.websites(req.params.id);
-  res.json(list.filter((w) => scope.canSeeSite(req.user, req.params.id, w.name)));
+  // Only the websites, and the API servers of the databases, this person may see.
+  res.json(list.filter((w) => scope.canSeeSite(req.user, req.params.id, w.name)).map((w) => ({ ...w, servers: w.servers.filter((x) => scope.canSeeDb(req.user, req.params.id, 'mongo', x.database)) })));
 });
 
 // Rename the API folder of a website (moves every API in it to the new address).

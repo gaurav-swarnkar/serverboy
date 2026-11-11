@@ -4,6 +4,8 @@ const ssh = require('../lib/ssh');
 const pm2 = require('../lib/pm2');
 const jobs = require('../lib/jobs');
 const catalog = require('../lib/catalog');
+const { can } = require('../lib/permissions');
+const scope = require('../lib/scope');
 const protect = require('../lib/self-protect');
 
 const { q, HttpError } = ssh;
@@ -54,6 +56,7 @@ function cpuTimes(line) {
 }
 
 router.get('/stats', async (req, res) => {
+  const seesAll = req.user.isOwner || (can(req.user, 'system') && scope.isAll(req.user, 'sites') && scope.isAll(req.user, 'databases'));
   const r = await ssh.exec(req.params.id, STATS_SCRIPT, { check: true });
   const s = sections(r.stdout);
   const c1 = cpuTimes(s.cpu1);
@@ -90,7 +93,9 @@ router.get('/stats', async (req, res) => {
       .filter(Boolean)
       .map((l) => {
         const [pid, user, cpu, mem2, rss, ...cmd] = l.trim().split(/\s+/);
-        return { pid: Number(pid), user, cpu: Number(cpu), mem: Number(mem2), rss: Number(rss) * 1024, command: cmd.join(' ') };
+        // A full command line can name websites, databases and folders: people limited to some
+        // of them see only the program's name.
+        return { pid: Number(pid), user, cpu: Number(cpu), mem: Number(mem2), rss: Number(rss) * 1024, command: seesAll ? cmd.join(' ') : String(cmd[0] || '').split('/').pop() };
       }),
     rebootRequired: s.reboot === 'yes',
   });
@@ -317,13 +322,14 @@ router.post('/firewall/:state', async (req, res) => {
 
 // ---------- Jobs ----------
 
+// The owner sees every task; others only the ones they started.
 router.get('/jobs', (req, res) => {
-  res.json(jobs.list(req.params.id));
+  res.json(jobs.list(req.params.id, req.user));
 });
 
 router.get('/jobs/:jobId', (req, res) => {
   const job = jobs.get(req.params.jobId);
-  if (!job || job.serverId !== req.params.id) throw new HttpError(404, 'Job not found');
+  if (!job || job.serverId !== req.params.id || !jobs.canSee(job, req.user)) throw new HttpError(404, 'Job not found');
   const offset = Math.max(0, Number(req.query.offset) || 0);
   // If the log was trimmed past our offset, resend the whole thing.
   const restart = offset > job.log.length;

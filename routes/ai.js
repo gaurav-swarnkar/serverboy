@@ -22,6 +22,15 @@ router.post('/ai-tokens', (req, res) => {
   res.json({ token, record });
 });
 
+// Switch between "only look" and "look and manage" without making a new token.
+router.patch('/ai-tokens/:id', (req, res) => {
+  const access = String(req.body?.access || '');
+  if (!ai.ACCESS.includes(access)) throw new HttpError(400, 'Access must be "read" or "manage"');
+  if (!ai.setAccess(req.params.id, access, req.user.isOwner ? null : req.user.id)) throw new HttpError(404, 'Token not found');
+  team.audit({ user: req.user.username, ip: req.ip, action: `Changed an AI connection to ${access === 'manage' ? 'look and manage' : 'only look'}` });
+  res.json({ ok: true, access });
+});
+
 router.delete('/ai-tokens/:id', (req, res) => {
   const ok = ai.revoke(req.params.id, req.user.isOwner ? null : req.user.id);
   if (!ok) throw new HttpError(404, 'Token not found');

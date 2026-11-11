@@ -28,3 +28,10 @@ test('a viewer can still look at servers and health', () => {
   assert.ok(v.includes('list_servers') && v.includes('server_health'));
   assert.ok(!v.includes('list_databases') && !v.includes('create_website'));
 });
+
+test('someone limited to some websites cannot be offered "create website"', () => {
+  const limited = { isOwner: false, permissions: ['databases', 'sites'], scope: { sites: [{ s: 'x', n: 'shop.com', l: 'edit' }], databases: 'all' } };
+  const t = names(limited, 'manage');
+  assert.ok(!t.includes('create_website'));
+  assert.ok(t.includes('set_website_live') && t.includes('create_api') && t.includes('my_access'));
+});

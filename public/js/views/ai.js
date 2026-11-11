@@ -75,7 +75,7 @@ export async function render(el) {
       r.tokens
         .map(
           (t) => `<tr><td><b>${esc(t.client || t.label)}</b><div class="small muted">${t.via === 'oauth' ? 'Connected app (signed in with Serverboy)' : `Token <span class="mono">${esc(t.prefix || '')}…</span>`}</div></td>
-          <td><span class="badge ${t.access === 'manage' ? 'warn' : ''}">${t.access === 'manage' ? 'look and manage' : 'only look'}</span></td>
+          <td><select data-access="${esc(t.id)}" style="width:auto;padding:4px 8px" title="Change what this connection may do"><option value="manage" ${t.access === 'manage' ? 'selected' : ''}>look and manage</option><option value="read" ${t.access === 'read' ? 'selected' : ''}>only look</option></select></td>
           ${showAll ? `<td>${esc(t.username || t.userId)}</td>` : ''}
           <td class="small">${when(t.createdAt)}</td><td class="small">${when(t.lastUsedAt)}</td>
           <td class="small">${t.via === 'oauth' ? 'renews itself' : t.expiresAt ? when(new Date(t.expiresAt).toISOString()) : 'never'}</td>
@@ -91,7 +91,7 @@ export async function render(el) {
       intro: 'The token acts as you. Paste it only into AI tools you trust.',
       fields: [
         { name: 'label', label: 'Name', placeholder: 'Claude Code on my laptop' },
-        { name: 'access', label: 'Access', type: 'select', value: 'read', options: [['read', 'Only look (safe to start with)'], ['manage', 'Look and manage']] },
+        { name: 'access', label: 'Access', type: 'select', value: 'manage', options: [['manage', 'Look and manage (make changes, within your access)'], ['read', 'Only look (no changes)']] },
         { name: 'days', label: 'Expires', type: 'select', value: '90', options: [['30', 'In 30 days'], ['90', 'In 90 days'], ['365', 'In a year'], ['0', 'Never']] },
       ],
       submitLabel: 'Make token',
@@ -122,6 +122,12 @@ export async function render(el) {
       if (!(await confirmDialog(`${b.textContent.trim()} "${b.dataset.name}"? It stops working right away.`, { danger: true, confirmLabel: b.textContent.trim() }))) return;
       if (await run(b, () => api(`/ai-tokens/${encodeURIComponent(b.dataset.id)}`, { method: 'DELETE' }), 'Done')) load();
     }
+  });
+  el.addEventListener('change', async (e) => {
+    const sel = e.target.closest('[data-access]');
+    if (!sel) return;
+    const ok = await run(null, () => api(`/ai-tokens/${encodeURIComponent(sel.dataset.access)}`, { method: 'PATCH', body: { access: sel.value } }), sel.value === 'manage' ? 'Now: look and manage' : 'Now: only look');
+    if (!ok) load();
   });
   el.querySelector('[data-act=all]')?.addEventListener('change', (e) => {
     showAll = e.target.checked;
