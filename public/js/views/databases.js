@@ -438,8 +438,8 @@ function renderMongo(el, server) {
     const box = document.createElement('div');
     let prepared = null;
     box.innerHTML = `
-      <label class="field"><span>File</span><input type="file" name="file" accept=".json,.ndjson,.jsonl,.csv,.tsv,application/json,text/csv">
-        <small>JSON array <span class="mono">[ {...}, {...} ]</span>, one JSON document per line (what <span class="mono">mongoexport</span> and Export make), or CSV / TSV with a header row. Up to 200 MB.</small></label>
+      <label class="field"><span>File</span><input type="file" name="file" accept=".json,.ndjson,.jsonl,.js,.txt,.bson,.csv,.tsv,application/json,text/csv">
+        <small>JSON array <span class="mono">[ {...}, {...} ]</span>, one JSON document per line, or JSON straight from MongoDB: <span class="mono">mongoexport</span> (also <span class="mono">--pretty</span>), Compass, mongosh output with <span class="mono">ObjectId('…')</span>, <span class="mono">ISODate('…')</span> and the like, or a <span class="mono">mongodump</span> <span class="mono">.bson</span> file. Also CSV / TSV with a header row. Up to 200 MB.</small></label>
       <label class="check"><input type="checkbox" name="types" checked> CSV: turn numbers and true / false into numbers and booleans</label>
       <div id="imp-preview"></div>`;
     const fileInput = box.querySelector('input[type=file]');
@@ -458,10 +458,10 @@ function renderMongo(el, server) {
         preview.innerHTML = `<div class="notice warn">${esc(err.message)}</div>`;
         return;
       }
-      const guess = col || f.name.replace(/\.(json|ndjson|jsonl|csv|tsv)$/i, '').replace(/[^A-Za-z0-9_.-]+/g, '_').slice(0, 60) || 'imported';
+      const guess = col || f.name.replace(/\.(json|ndjson|jsonl|js|txt|bson|csv|tsv)$/i, '').replace(/[^A-Za-z0-9_.-]+/g, '_').slice(0, 60) || 'imported';
       const existing = (name) => prepared.collections.find((c) => c.name === name);
       preview.innerHTML = `
-        <div class="notice" style="margin:10px 0"><b>${prepared.count.toLocaleString()} document(s)</b> found (${esc({ 'json-array': 'JSON array', ndjson: 'JSON, one per line', csv: 'CSV', tsv: 'TSV' }[prepared.format] || prepared.format)}).
+        <div class="notice" style="margin:10px 0"><b>${prepared.count.toLocaleString()} document(s)</b> found (${esc({ 'json-array': 'JSON array', ndjson: 'JSON, one per line', 'json-wrapper': 'JSON, documents inside a list', mongo: 'MongoDB JSON, converted', bson: 'mongodump .bson', csv: 'CSV', tsv: 'TSV' }[prepared.format] || prepared.format)}).
           Fields: ${prepared.fields.map((x) => `<span class="mono">${esc(x)}</span>`).join(', ')}</div>
         <details><summary class="small">First ${prepared.sample.length} document(s)</summary><pre class="log" style="max-height:200px">${esc(JSON.stringify(prepared.sample, null, 2))}</pre></details>
         <div class="form-grid" style="margin-top:10px">

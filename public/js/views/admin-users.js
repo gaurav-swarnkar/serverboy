@@ -14,14 +14,21 @@ export async function render(el, { servers }) {
     if (!info) return;
     el.querySelector('[data-action=add]').disabled = false;
     let tfa = [];
-    [users, roles, tfa] = await Promise.all([api('/team/users'), api('/team/roles'), api('/2fa/users').catch(() => [])]);
+    let aiSet = { team: true, blocked: [] };
+    [users, roles, tfa, aiSet] = await Promise.all([api('/team/users'), api('/team/roles'), api('/2fa/users').catch(() => []), api('/ai-settings').catch(() => aiSet)]);
     const has2fa = (id) => tfa.includes(String(id));
+    // AI connector: on unless the owner turned it off for this person (or for the whole team).
+    const aiCell = (u, i) => {
+      if (!aiSet.team) return '<a class="badge" href="#/admin/settings" title="Turned off for the whole team under Settings">off (team)</a>';
+      const on = !aiSet.blocked.includes(String(u.id));
+      return `<label class="check small" title="May ${esc(u.username)} connect Claude or another AI agent to Serverboy?"><input type="checkbox" data-ai="${i}" ${on ? 'checked' : ''}> ${on ? 'allowed' : 'off'}</label>`;
+    };
     body.innerHTML = `
       <div class="card flush">
         <div class="table-wrap"><table>
-          <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Can do</th><th>Access</th><th>Status</th><th>Two-step</th><th>Last login</th><th></th></tr></thead>
+          <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Can do</th><th>Access</th><th>Status</th><th>Two-step</th><th>AI connector</th><th>Last login</th><th></th></tr></thead>
           <tbody>
-            <tr><td><b>admin</b><div class="small muted">You</div></td><td class="small">${esc(session.user.email || '')}</td><td><span class="badge accent">Owner</span></td><td><span class="small">Everything</span></td><td class="small">All</td><td><span class="badge ok">active</span></td><td>${has2fa('owner') ? '<span class="badge ok">on</span>' : '<a class="badge warn" href="#/account">off</a>'}</td><td></td><td></td></tr>
+            <tr><td><b>admin</b><div class="small muted">You</div></td><td class="small">${esc(session.user.email || '')}</td><td><span class="badge accent">Owner</span></td><td><span class="small">Everything</span></td><td class="small">All</td><td><span class="badge ok">active</span></td><td>${has2fa('owner') ? '<span class="badge ok">on</span>' : '<a class="badge warn" href="#/account">off</a>'}</td><td class="small">always</td><td></td><td></td></tr>
             ${users
               .map(
                 (u, i) => `<tr>
@@ -32,6 +39,7 @@ export async function render(el, { servers }) {
               <td class="small">${esc(scopeSummary(u.scope))}</td>
               <td>${u.disabled ? '<span class="badge bad">disabled</span>' : '<span class="badge ok">active</span>'}</td>
               <td>${has2fa(u.id) ? '<span class="badge ok">on</span>' : '<span class="badge">off</span>'}</td>
+              <td>${aiCell(u, i)}</td>
               <td class="small">${u.lastLoginAt ? fmtDate(Date.parse(u.lastLoginAt)) : '<span class="muted">never</span>'}</td>
               <td class="actions">
                 ${u.disabled ? '' : `<button class="btn-sm" data-action="viewAs" data-i="${i}" title="Open ${esc(u.username)}'s account in a new tab to see exactly what they see">Log in as</button>`}
@@ -43,12 +51,22 @@ export async function render(el, { servers }) {
               </td></tr>`,
               )
               .join('')}
-            ${users.length ? '' : '<tr><td colspan="9" class="empty">No team members yet. Click <b>+ Add user</b>.</td></tr>'}
+            ${users.length ? '' : '<tr><td colspan="10" class="empty">No team members yet. Click <b>+ Add user</b>.</td></tr>'}
           </tbody>
         </table></div>
       </div>
-      <p class="small muted">Changes apply immediately. Disabling, deleting or resetting a password logs that person out. Manage what each role can do under <a href="#/admin/roles">Roles &amp; permissions</a>.</p>`;
+      <p class="small muted">Changes apply immediately. Disabling, deleting or resetting a password logs that person out. Manage what each role can do under <a href="#/admin/roles">Roles &amp; permissions</a>. The AI connector lets a person use Serverboy from Claude or another AI agent, with their own permissions; turning it off stops their AI tokens and connected apps right away.</p>`;
   }
+
+  body.addEventListener('change', async (e) => {
+    const box = e.target.closest('[data-ai]');
+    if (!box) return;
+    const u = users[Number(box.dataset.ai)];
+    const allowed = box.checked;
+    const ok = await run(null, () => api(`/ai-settings/users/${encodeURIComponent(u.id)}`, { method: 'PUT', body: { allowed } }), allowed ? `${u.username} may use the AI connector` : `AI connector turned off for ${u.username}`);
+    if (!ok) box.checked = !allowed;
+    else box.parentElement.lastChild.textContent = allowed ? ' allowed' : ' off';
+  });
 
   // Add / edit dialog: pick a role, or "Custom" to tick permissions for just this person.
   function userDialog(existing) {

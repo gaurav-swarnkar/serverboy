@@ -146,7 +146,7 @@ export const CHAPTERS = [
           '<b>Open the collection.</b> In the list on the left, click the database, then the collection. The <b>Documents</b> tab shows what is inside.',
           '<b>Add an item.</b> Click <b>+ Insert document</b> and type it as JSON, for example <span class="mono">{"name": "Green tea", "price": 4.5}</span>. Click save. MongoDB gives every item an <span class="mono">_id</span> by itself.',
           '<b>Change or delete items</b> with <b>Edit</b> and <b>Delete</b> on each document.',
-          '<b>Import many items at once.</b> Click <b>⬆ Import</b>, choose a <span class="mono">.json</span> or <span class="mono">.csv</span> file (for example exported from Excel), check the preview and click <b>Import</b>.',
+          '<b>Import many items at once.</b> Click <b>⬆ Import</b>, choose a <span class="mono">.json</span> or <span class="mono">.csv</span> file (for example exported from Excel), check the preview and click <b>Import</b>. JSON copied straight from MongoDB works too: Compass or mongosh output with <span class="mono">ObjectId(\'…\')</span> and <span class="mono">ISODate(\'…\')</span>, mongoexport files, and mongodump <span class="mono">.bson</span> files. Serverboy turns them into proper documents with the right types.',
           '<b>Add more collections</b> with <b>+ Collection</b> under the database.',
         ],
       },
@@ -426,7 +426,7 @@ export const CHAPTERS = [
         ],
         tip: 'For Claude Code, Cursor and other agents, make a token on the AI connector page instead; it shows the command to paste.',
       },
-      { h: 'Staying in control', list: ['Everyone on the team can connect their own AI. It can only do what that person\'s role allows.', 'Everything the AI changes is in the activity log, marked "(via AI: …)".', '"Only look" access cannot change anything.', 'Disconnect an app or revoke a token any time on the AI connector page.'] },
+      { h: 'Staying in control', list: ['Everyone on the team can connect their own AI. It can only do what that person\'s role allows.', 'The owner decides who may use it: turn it off for the whole team (Administration → Settings) or for one person (Administration → Users). Their tokens and apps stop working right away.', 'Everything the AI changes is in the activity log, marked "(via AI: …)".', '"Only look" access cannot change anything.', 'Disconnect an app or revoke a token any time on the AI connector page.'] },
     ],
   },
   {

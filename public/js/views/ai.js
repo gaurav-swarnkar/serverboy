@@ -20,7 +20,8 @@ export async function render(el) {
   const user = session.user;
   let showAll = false;
   el.innerHTML = `
-    <div class="page-head"><div><h1>AI connector</h1><div class="sub">Manage Serverboy from Claude or any other AI agent (MCP). Everyone on the team can connect their own AI: it can do what that person can do here, and nothing more.</div></div></div>
+    <div class="page-head"><div><h1>AI connector</h1><div class="sub">Manage Serverboy from Claude or any other AI agent (MCP). Everyone on the team can connect their own AI (the owner can turn this off per person): it can do what that person can do here, and nothing more.</div></div></div>
+    <div class="notice warn" id="ai-off" hidden style="margin-bottom:14px"><b>The AI connector is turned off for your account.</b> The Serverboy owner decides who may use it. Your tokens and connected apps do not work until they turn it on again.</div>
     <div class="card" style="margin-bottom:14px">
       <h3 style="margin-top:0">Connector address</h3>
       <div class="row" style="flex-wrap:nowrap"><input class="mono" readonly value="${esc(url)}" style="flex:1"><button data-act="copyUrl">Copy</button></div>
@@ -71,6 +72,9 @@ export async function render(el) {
       list.innerHTML = errorHtml(err);
       return;
     }
+    const off = el.querySelector('#ai-off');
+    off.hidden = r.allowed !== false;
+    el.querySelectorAll('[data-act=newToken]').forEach((b) => (b.disabled = r.allowed === false));
     list.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Access</th>${showAll ? '<th>Person</th>' : ''}<th>Made</th><th>Last used</th><th>Expires</th><th></th></tr></thead><tbody>${
       r.tokens
         .map(

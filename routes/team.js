@@ -115,6 +115,7 @@ router.delete('/team/users/:userId', async (req, res) => {
   // A removed person's phones stop getting notifications, and their two-step login is forgotten.
   require('../lib/push').removeUser(req.params.userId);
   require('../lib/twofactor').disable(req.params.userId);
+  require('../lib/ai-access').forgetUser(req.params.userId);
   team.audit({ user: req.user.username, ip: req.ip, action: `Deleted user ${user?.username || req.params.userId}` });
   res.json({ ok: true });
 });

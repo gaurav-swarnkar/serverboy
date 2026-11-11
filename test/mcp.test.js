@@ -142,3 +142,16 @@ test('a revoked token stops working', async () => {
   await api(`/api/ai-tokens/${id}`, 'DELETE');
   assert.equal((await mcp(readToken, 'tools/list')).status, 401);
 });
+
+test('only the owner decides who may use the AI connector; AI tokens cannot change it', async () => {
+  const s = await (await api('/api/ai-settings')).json();
+  assert.deepEqual(s, { team: true, blocked: [] });
+  assert.equal((await (await api('/api/ai-tokens')).json()).allowed, true);
+  const off = await (await api('/api/ai-settings', 'PUT', { team: false })).json();
+  assert.equal(off.team, false);
+  // The owner's own AI keeps working.
+  assert.equal((await mcp(manageToken, 'tools/list')).status, 200);
+  assert.equal((await fetch(`${base}/api/ai-settings`, { method: 'PUT', headers: { authorization: `Bearer ${manageToken}`, 'content-type': 'application/json' }, body: '{"team":true}' })).status, 403);
+  assert.equal((await api('/api/ai-settings', 'PUT', { team: 'yes' })).status, 400);
+  await api('/api/ai-settings', 'PUT', { team: true });
+});

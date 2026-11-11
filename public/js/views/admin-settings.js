@@ -8,6 +8,7 @@ export async function render(el, { servers }) {
     <div id="updates" style="margin-top:16px"></div>
     <div id="sbbackup" style="margin-top:16px"></div>
     <div class="card" style="margin-top:16px;max-width:780px" id="tfa-settings"></div>
+    <div class="card" style="margin-top:16px;max-width:780px" id="ai-settings"></div>
     <div class="card" style="margin-top:16px;max-width:780px">
       <h2>Owner login</h2>
       <p class="muted" style="margin-top:0">You log in as <b>admin</b>. This login is stored by Serverboy itself, not in MongoDB, so it keeps working even if the database is down.</p>
@@ -19,6 +20,7 @@ export async function render(el, { servers }) {
   const db = el.querySelector('#db');
   mountSelfBackup(el.querySelector('#sbbackup'));
   mountTwoStep(el.querySelector('#tfa-settings'));
+  mountAiSettings(el.querySelector('#ai-settings'));
 
   async function load() {
     db.innerHTML = loadingHtml();
@@ -159,4 +161,23 @@ async function mountTwoStep(box) {
     });
   };
   draw();
+}
+
+// Who may use the AI connector (MCP). The owner always may.
+async function mountAiSettings(box) {
+  let st;
+  try {
+    st = await api('/ai-settings');
+  } catch (err) {
+    box.innerHTML = errorHtml(err);
+    return;
+  }
+  box.innerHTML = `<h2>AI connector</h2>
+    <p class="muted" style="margin-top:0">Team members can connect Claude or another AI agent to Serverboy. Their AI can do only what they can do here.</p>
+    <label class="check"><input type="checkbox" data-team ${st.team ? 'checked' : ''}> <b>Team members may use the AI connector</b></label>
+    <p class="small muted" style="margin-bottom:0">Turn it on or off for single people under <a href="#/admin/users">Users</a>${st.blocked.length ? ` (off for ${st.blocked.length} now)` : ''}. Turning it off stops their AI tokens and connected apps right away; turning it back on makes them work again. You (the owner) can always use it.</p>`;
+  box.querySelector('[data-team]').addEventListener('change', async (e) => {
+    const ok = await run(null, () => api('/ai-settings', { method: 'PUT', body: { team: e.target.checked } }), e.target.checked ? 'Team members may use the AI connector' : 'AI connector turned off for team members');
+    if (!ok) e.target.checked = !e.target.checked;
+  });
 }

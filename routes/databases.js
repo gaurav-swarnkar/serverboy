@@ -331,7 +331,7 @@ const IMPORT_MAX = 200 * 1024 * 1024;
 router.post('/mongo/databases/:db/import/prepare', upload.single('file'), async (req, res) => {
   const dbName = mongoName(req.params.db, 'database name');
   protect.assertWritable('mongo', dbName, req.body?.collection);
-  if (!req.file) throw new HttpError(400, 'Choose a .json, .ndjson or .csv file');
+  if (!req.file) throw new HttpError(400, 'Choose a .json, .bson or .csv file');
   if (req.file.size > IMPORT_MAX) throw new HttpError(400, 'The file is larger than 200 MB. Use mongoimport in the terminal for very large files.');
   let parsed;
   try {
@@ -376,7 +376,7 @@ const before = c.countDocuments();
 const errors = [];
 let failed = 0;
 for (let i = 0; i < lines.length; i += 1000) {
-  const batch = lines.slice(i, i + 1000).map((l) => EJSON.parse(l));
+  const batch = lines.slice(i, i + 1000).map((l) => EJSON.parse(l, { relaxed: false }));
   try {
     c.insertMany(batch, { ordered: false });
   } catch (e) {
