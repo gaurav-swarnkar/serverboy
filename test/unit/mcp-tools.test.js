@@ -35,3 +35,12 @@ test('someone limited to some websites cannot be offered "create website"', () =
   assert.ok(!t.includes('create_website'));
   assert.ok(t.includes('set_website_live') && t.includes('create_api') && t.includes('my_access'));
 });
+
+test('website file tools follow the "files" permission and the token access', () => {
+  const dev = names(developer, 'manage');
+  for (const t of ['list_website_files', 'read_website_file', 'write_website_file', 'delete_website_file']) assert.ok(dev.includes(t), t);
+  const read = names(developer, 'read');
+  assert.ok(read.includes('read_website_file') && !read.includes('write_website_file'));
+  const noFiles = names({ isOwner: false, permissions: ['sites'] }, 'manage');
+  assert.ok(!noFiles.includes('write_website_file'));
+});

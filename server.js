@@ -6,7 +6,7 @@ const store = require('./lib/store');
 const auth = require('./lib/auth');
 const terminal = require('./lib/terminal');
 const team = require('./lib/team');
-const { requiredForServerRoute, can } = require('./lib/permissions');
+const { serverRouteRule, can } = require('./lib/permissions');
 const version = require('./lib/version');
 
 const HOST = process.env.HOST || '127.0.0.1';
@@ -88,8 +88,15 @@ require('./lib/self-backup').startScheduler();
 const perServer = express.Router({ mergeParams: true });
 perServer.use((req, res, next) => {
   if (!store.getServer(req.params.id)) return res.status(404).json({ error: 'Server not found' });
-  const needed = requiredForServerRoute(req.method, req.path);
-  if (!can(req.user, needed)) return res.status(403).json({ error: auth.deniedMessage(needed) });
+  const { perm: needed, known } = serverRouteRule(req.method, req.path);
+  // Not a team route: for team members it does not exist (not "only the owner"), so a mistyped
+  // address (often by an AI) is not mistaken for a permission problem.
+  if (!known && !req.user.isOwner) return res.status(404).json({ error: `There is no Serverboy endpoint ${req.method} /api/servers/<id>${req.path}. Check the address.` });
+  if (!can(req.user, needed)) {
+    // The most common mix-up: changing a website's Nginx settings when the pages were meant.
+    const hint = /^\/sites\/[^/]+\/config$/.test(req.path) ? ' (Editing a website\'s Nginx settings is owner-only. To change its pages, change the files in its folder: File Manager, or write_website_file in the AI connector.)' : '';
+    return res.status(403).json({ error: auth.deniedMessage(needed) + hint });
+  }
   next();
 });
 perServer.use(require('./routes/system'));

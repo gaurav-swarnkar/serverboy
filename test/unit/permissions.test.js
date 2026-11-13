@@ -49,3 +49,10 @@ test('scoped access to websites and databases', () => {
   assert.equal(scope.isAll({ isOwner: true }, 'sites'), true);
   assert.equal(scope.isAll(dev, 'sites'), false);
 });
+
+test('routes not in the list are owner-only and marked unknown', () => {
+  const { serverRouteRule } = require('../../lib/permissions');
+  assert.deepEqual(serverRouteRule('GET', '/no-such-thing'), { perm: OWNER, known: false });
+  assert.deepEqual(serverRouteRule('POST', '/backups/run'), { perm: OWNER, known: true });
+  assert.deepEqual(serverRouteRule('POST', '/files/write'), { perm: 'files', known: true });
+});
